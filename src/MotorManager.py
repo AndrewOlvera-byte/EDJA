@@ -15,6 +15,7 @@ class MotorManager:
         step_sleep = 0.002
 
         step_count = 4096 / 360 * self.degrees # 5.625*(1/64) per step, 4096 steps is 360°
+        int_step_count = int(step_count)
 
         direction = False # True for clockwise, False for counter-clockwise
 
@@ -55,7 +56,7 @@ class MotorManager:
         # the meat
         try:
             i = 0
-            for i in range(step_count):
+            for i in range(int_step_count):
                 for pin in range(0, len(motor_pins)):
                     GPIO.output( motor_pins[pin], step_sequence[motor_step_counter][pin] )
                 if direction==True:
