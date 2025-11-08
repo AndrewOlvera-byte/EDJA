@@ -1,3 +1,4 @@
+import MotorManager
 class App:
     def __init__(self):
         self.motor = MotorManager()
