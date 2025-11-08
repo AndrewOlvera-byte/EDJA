@@ -1,4 +1,5 @@
 from MotorManager import MotorManager
+import threading
 class App:
     def __init__(self):
         self.gpio_pins_up_down = [17, 18, 27, 22]
@@ -8,11 +9,17 @@ class App:
         self.right_left_motor = MotorManager(self.gpio_pins_right_left)
 
     def run(self):
-        self.up_down_motor.runMotor(360.0, True)
-        self.right_left_motor.runMotor(360.0, True)
+        thread1 = threading.Thread(target=self.up_down_motor.runMotor, args=(360.0, False))
+        thread2 = threading.Thread(target=self.right_left_motor.runMotor, args=(360.0, False))
+
+        thread1.start()
+        thread2.start()
+
+        thread1.join()
+        thread2.join()
+
         exit(0)
 
-        #TODO: Implement the main loop of the application
 
     
 if __name__ == "__main__":
