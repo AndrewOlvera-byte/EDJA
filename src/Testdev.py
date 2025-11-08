@@ -1,24 +1,10 @@
-from gpiozero import OutputDevice
+from RpiMotorLib import RpiMotorLib
 from time import sleep
 
-coil1 = OutputDevice(17)
-coil2 = OutputDevice(18)
-coil3 = OutputDevice(27)
-coil4 = OutputDevice(22)
+motorPins = [17,18,27,22]
 
 # simple half-step sequence
-halfstep_seq = [
-    [1,0,0,0],
-    [1,1,0,0],
-    [0,1,0,0],
-    [0,1,1,0],
-    [0,0,1,0],
-    [0,0,1,1],
-    [0,0,0,1],
-    [1,0,0,1]
-]
+myMotor = RpiMotorLib.BYJMotor("28BYJ48","28BYJ48")
+myMotor.motor_run(motorPins, 0.002, 4096, False, False, "full", 0.05)
 
-while True:
-    for step in halfstep_seq:
-        coil1.value, coil2.value, coil3.value, coil4.value = step
-        sleep(0.001)
+GPIO.cleanup()
