@@ -1,8 +1,10 @@
 import RPi.GPIO as GPIO
 import time
 class MotorManager:
-    def runMotor(degree):
-        degrees = degree
+    def __init__(self, degree):
+        self.degrees = degree
+        pass
+    def runMotor(self):
         in1 = 17
         in2 = 18
         in3 = 27
@@ -11,7 +13,7 @@ class MotorManager:
         # careful lowering this, at some point you run into the mechanical limitation of how quick your motor can move
         step_sleep = 0.002
 
-        step_count = 4096 / 360 * degrees # 5.625*(1/64) per step, 4096 steps is 360°
+        step_count = 4096 / 360 * self.degrees # 5.625*(1/64) per step, 4096 steps is 360°
 
         direction = False # True for clockwise, False for counter-clockwise
 
