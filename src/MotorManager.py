@@ -1,5 +1,3 @@
-<<<<<<< Updated upstream
-=======
 import RPi.GPIO as GPIO
 import time
 class MotorManager:
@@ -63,4 +61,3 @@ class MotorManager:
 
         cleanup()
         exit( 0 )
->>>>>>> Stashed changes
