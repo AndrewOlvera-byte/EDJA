@@ -59,4 +59,3 @@ class MotorManager:
         GPIO.output( self.pins[1], GPIO.LOW )
         GPIO.output( self.pins[2], GPIO.LOW )
         GPIO.output( self.pins[3], GPIO.LOW )
-        GPIO.cleanup()
