@@ -1,7 +1,5 @@
 class App:
     def __init__(self):
-        self.vis = VisionManager()
-        self.track = TrackAlgo()
         self.motor = MotorManager()
 
     def run(self):
@@ -10,6 +8,6 @@ class App:
     
     
 if __name__ == "__main__":
-    motor = App()
-    motor.runMotor(360)
+    app = App()
+    app.run()
     
