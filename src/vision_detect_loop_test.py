@@ -18,6 +18,7 @@ OLD_MODELS_DIR = BASE_DIR / "models"
 INPUT_SIZE = (640, 640)                        # YOLOv11n default inference size
 WINDOW_NAME = "YOLOv11n ONNX (FPS)"
 CONFIDENCE_THRESHOLD = 0.25                    # not used unless you add postprocessing
+NMS_IOU_THRESHOLD = 0.50                       # IoU threshold for NMS when parsing raw outputs
 
 
 def _find_downloaded_pt() -> Path | None:
@@ -131,6 +132,148 @@ def preprocess_for_onnx(image_rgb: np.ndarray, size=(640, 640)) -> np.ndarray:
     return tensor
 
 
+def non_max_suppression(boxes_xyxy: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
+    """
+    A simple NMS implementation. Returns indices of boxes to keep.
+    boxes_xyxy: (N, 4) in xyxy format.
+    scores: (N,)
+    """
+    if boxes_xyxy.size == 0:
+        return np.array([], dtype=np.int32)
+
+    x1 = boxes_xyxy[:, 0]
+    y1 = boxes_xyxy[:, 1]
+    x2 = boxes_xyxy[:, 2]
+    y2 = boxes_xyxy[:, 3]
+
+    areas = (x2 - x1).clip(min=0) * (y2 - y1).clip(min=0)
+    order = scores.argsort()[::-1]
+
+    keep_indices = []
+    while order.size > 0:
+        i = order[0]
+        keep_indices.append(i)
+
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = (xx2 - xx1).clip(min=0)
+        h = (yy2 - yy1).clip(min=0)
+        inter = w * h
+        union = areas[i] + areas[order[1:]] - inter
+        iou = inter / (union + 1e-7)
+
+        remaining = np.where(iou <= iou_threshold)[0]
+        order = order[remaining + 1]
+
+    return np.array(keep_indices, dtype=np.int32)
+
+
+def parse_onnx_detections(outputs: list, conf_threshold: float) -> np.ndarray:
+    """
+    Parse ONNX outputs into detections in the ONNX input coordinate space (640x640).
+    Returns detections as (M, 6): [x1, y1, x2, y2, score, class_id].
+
+    Handles two common cases:
+    - Fused NMS export: output already Nx6 (or 1xNx6).
+    - Raw predictions: (1, N, 4+num_classes) or (1, 4+num_classes, N).
+    """
+    if not outputs:
+        return np.zeros((0, 6), dtype=np.float32)
+
+    out0 = outputs[0]
+    arr = np.array(out0)
+    squeezed = np.squeeze(arr)
+
+    # Case A: Fused NMS → detections already in [x1,y1,x2,y2,score,class]
+    if squeezed.ndim == 2 and squeezed.shape[-1] in (6, 7):
+        # Some exports may include batch index making it 7 columns; drop if present
+        if squeezed.shape[-1] == 7:
+            # Heuristic: if first column appears to be all zeros (batch idx), drop it
+            if np.all((squeezed[:, 0] == 0) | (squeezed[:, 0] == 1)):
+                squeezed = squeezed[:, 1:]
+        dets = squeezed.astype(np.float32)
+        if dets.size == 0:
+            return np.zeros((0, 6), dtype=np.float32)
+        # Filter by confidence
+        conf_mask = dets[:, 4] >= conf_threshold
+        return dets[conf_mask]
+
+    # Case B: Raw predictions → (1, N, 4+classes) or (1, 4+classes, N)
+    preds = arr
+    if preds.ndim == 3 and preds.shape[0] == 1:
+        # Ensure shape is (1, N, C)
+        if preds.shape[1] in (84, 85) and preds.shape[2] > preds.shape[1]:
+            preds = np.transpose(preds, (0, 2, 1))
+        preds = preds[0]  # (N, C)
+    elif preds.ndim == 2:
+        # Already (N, C)
+        preds = preds
+    else:
+        return np.zeros((0, 6), dtype=np.float32)
+
+    if preds.shape[1] <= 4:
+        return np.zeros((0, 6), dtype=np.float32)
+
+    boxes_xywh = preds[:, 0:4]
+    class_scores = preds[:, 4:]
+    if class_scores.size == 0:
+        return np.zeros((0, 6), dtype=np.float32)
+
+    scores = class_scores.max(axis=1)
+    class_ids = class_scores.argmax(axis=1)
+
+    conf_mask = scores >= conf_threshold
+    if not np.any(conf_mask):
+        return np.zeros((0, 6), dtype=np.float32)
+
+    boxes_xywh = boxes_xywh[conf_mask]
+    scores = scores[conf_mask]
+    class_ids = class_ids[conf_mask]
+
+    # Convert xywh -> xyxy
+    x, y, w, h = boxes_xywh.T
+    x1 = x - w / 2.0
+    y1 = y - h / 2.0
+    x2 = x + w / 2.0
+    y2 = y + h / 2.0
+    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+    # Apply NMS
+    keep = non_max_suppression(boxes_xyxy, scores, NMS_IOU_THRESHOLD)
+    if keep.size == 0:
+        return np.zeros((0, 6), dtype=np.float32)
+
+    dets = np.concatenate([boxes_xyxy[keep], scores[keep, None], class_ids[keep, None].astype(np.float32)], axis=1)
+    return dets.astype(np.float32)
+
+
+def draw_detections(frame_bgr: np.ndarray, dets_xyxy: np.ndarray, scale_x: float, scale_y: float) -> None:
+    """
+    Draw rectangles and labels onto frame_bgr using detections in model (input) space.
+    dets_xyxy: (M, 6) with [x1,y1,x2,y2,score,class_id]
+    """
+    if dets_xyxy.size == 0:
+        return
+    h, w = frame_bgr.shape[:2]
+    for det in dets_xyxy:
+        x1, y1, x2, y2, score, cls_id = det.tolist()
+        # Scale from model input space (640x640) to original frame size
+        rx1 = int(max(0, min(w - 1, x1 * scale_x)))
+        ry1 = int(max(0, min(h - 1, y1 * scale_y)))
+        rx2 = int(max(0, min(w - 1, x2 * scale_x)))
+        ry2 = int(max(0, min(h - 1, y2 * scale_y)))
+
+        color = (0, 255, 255) if int(cls_id) % 2 == 0 else (255, 0, 0)
+        cv2.rectangle(frame_bgr, (rx1, ry1), (rx2, ry2), color, 2)
+        label = f"{int(cls_id)}:{score:.2f}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame_bgr, (rx1, max(0, ry1 - th - 6)), (rx1 + tw + 4, ry1), color, -1)
+        cv2.putText(frame_bgr, label, (rx1 + 2, ry1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
+
 def main():
     # 1) Ensure model is present (export if possible)
     onnx_path = ensure_onnx_model_exists()
@@ -166,8 +309,9 @@ def main():
             # Prepare model input
             input_tensor = preprocess_for_onnx(frame_rgb, size=INPUT_SIZE)
 
-            # Run inference (we do not postprocess here; goal is to stress the model and show FPS)
-            _ = session.run(None, {input_name: input_tensor})
+            # Run inference and parse detections
+            outputs = session.run(None, {input_name: input_tensor})
+            dets = parse_onnx_detections(outputs, conf_threshold=CONFIDENCE_THRESHOLD)
 
             # Compute FPS
             dt = time.perf_counter() - loop_start
@@ -180,6 +324,13 @@ def main():
 
             # Convert to BGR for display and overlay FPS
             frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+            # Draw detections (scale from model input size to original frame size)
+            h, w = frame_bgr.shape[:2]
+            scale_x = w / float(INPUT_SIZE[0])
+            scale_y = h / float(INPUT_SIZE[1])
+            draw_detections(frame_bgr, dets, scale_x, scale_y)
+
             cv2.putText(
                 frame_bgr,
                 f"FPS: {fps_smooth:.2f}",
