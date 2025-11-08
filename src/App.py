@@ -18,6 +18,8 @@ class App:
         thread1.join()
         thread2.join()
 
+        self.up_down_motor.cleanup()
+        self.right_left_motor.cleanup()
         exit(0)
 
 

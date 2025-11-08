@@ -51,5 +51,12 @@ class MotorManager:
                 motor_step_counter = (motor_step_counter - 1) % 8 if direction == True else (motor_step_counter + 1) % 8
                 time.sleep(step_sleep)
 
-        finally:
-            GPIO.cleanup()
+        except KeyboardInterrupt:
+            exit(1)
+
+    def cleanup(self):
+        GPIO.output( self.pins[0], GPIO.LOW )
+        GPIO.output( self.pins[1], GPIO.LOW )
+        GPIO.output( self.pins[2], GPIO.LOW )
+        GPIO.output( self.pins[3], GPIO.LOW )
+        GPIO.cleanup()
