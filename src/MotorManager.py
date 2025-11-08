@@ -13,14 +13,14 @@ GPIO.setup(IN3, GPIO.OUT)
 GPIO.setup(IN4, GPIO.OUT)
 
 halfstep_seq = [
+    [1,0,0,1],
     [1,0,0,0],
     [1,1,0,0],
     [0,1,0,0],
     [0,1,1,0],
     [0,0,1,0],
     [0,0,1,1],
-    [0,0,0,1],
-    [1,0,0,1]
+    [0,0,0,1]
 ]
 
 def move_steps(steps, delay = 0.001):
