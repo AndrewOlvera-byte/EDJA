@@ -59,12 +59,12 @@ try:
         else: # defensive programming
             print( "uh oh... direction should *always* be either True or False" )
             cleanup()
-            exit( 1 )
+            exit(1)
         time.sleep( step_sleep )
 
 except KeyboardInterrupt:
     cleanup()
-    exit( 1 )
+    exit(1)
 
 cleanup()
 exit( 0 )
