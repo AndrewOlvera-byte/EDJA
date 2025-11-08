@@ -9,14 +9,12 @@ import onnxruntime as ort
 from picamera2 import Picamera2
 
 
-# Configuration (anchor all paths to this script's directory to avoid CWD issues)
+# Configuration (use this script's directory only; no subfolders)
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "models"
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_ONNX_PATH = MODEL_DIR / "yolo11n.onnx"   # expected local ONNX path
-MODEL_PT_PATH = MODEL_DIR / "yolo11n.pt"       # local .pt for export / caching
-LEGACY_PT_PATH = BASE_DIR / "yolo11n.pt"       # if earlier runs saved here, we migrate it
-LEGACY_ONNX_PATH = BASE_DIR / "yolo11n.onnx"   # if export dropped here, we migrate it
+PT_PATH = BASE_DIR / "yolo11n.pt"
+ONNX_PATH = BASE_DIR / "yolo11n.onnx"
+# Migrate from old layout if present
+OLD_MODELS_DIR = BASE_DIR / "models"
 INPUT_SIZE = (640, 640)                        # YOLOv11n default inference size
 WINDOW_NAME = "YOLOv11n ONNX (FPS)"
 CONFIDENCE_THRESHOLD = 0.25                    # not used unless you add postprocessing
@@ -36,40 +34,38 @@ def _find_downloaded_pt() -> Path | None:
 
 def ensure_onnx_model_exists() -> Path:
     """
-    Ensure an ONNX model exists at MODEL_ONNX_PATH. If missing, try to:
-    1) Ensure a local .pt at MODEL_PT_PATH (download via Ultralytics if online).
-    2) Export ONNX from the local .pt and place it at MODEL_ONNX_PATH.
+    Ensure an ONNX model exists at ONNX_PATH. If missing, try to:
+    1) Ensure a local .pt at PT_PATH (download via Ultralytics if online).
+    2) Export ONNX from the local .pt and place it at ONNX_PATH.
     """
-    # Migrate misplaced legacy files if present (from prior versions / wrong CWD)
+    # Migrate from old 'models' subdir if files exist there
     import shutil
-    # Move any yolo11n*.pt from BASE_DIR into MODEL_DIR (first match)
-    legacy_pts = sorted(BASE_DIR.glob("yolo11n*.pt"))
-    if legacy_pts and not MODEL_PT_PATH.exists():
-        shutil.copy2(legacy_pts[0], MODEL_PT_PATH)
-        print(f"Found legacy PT at {legacy_pts[0]}, copied to {MODEL_PT_PATH}")
-    # Move any yolo11n*.onnx from BASE_DIR into MODEL_DIR (first match)
-    legacy_onnx = sorted(BASE_DIR.glob("yolo11n*.onnx"))
-    if legacy_onnx and not MODEL_ONNX_PATH.exists():
-        legacy_onnx[0].replace(MODEL_ONNX_PATH)
-        print(f"Found legacy ONNX at {legacy_onnx[0]}, moved to {MODEL_ONNX_PATH}")
+    old_pt = OLD_MODELS_DIR / "yolo11n.pt"
+    if old_pt.exists() and not PT_PATH.exists():
+        shutil.copy2(old_pt, PT_PATH)
+        print(f"Found legacy PT at {old_pt}, copied to {PT_PATH}")
+    old_onnx = OLD_MODELS_DIR / "yolo11n.onnx"
+    if old_onnx.exists() and not ONNX_PATH.exists():
+        old_onnx.replace(ONNX_PATH)
+        print(f"Found legacy ONNX at {old_onnx}, moved to {ONNX_PATH}")
 
-    if MODEL_ONNX_PATH.exists():
-        return MODEL_ONNX_PATH
+    if ONNX_PATH.exists():
+        return ONNX_PATH
 
     try:
         from ultralytics import YOLO
     except Exception:
         # If Ultralytics isn't present, we can't download or export.
         raise FileNotFoundError(
-            f"Missing {MODEL_ONNX_PATH}. Install Ultralytics to auto-download/export once online:\n"
+            f"Missing {ONNX_PATH}. Install Ultralytics to auto-download/export once online:\n"
             "  pip install ultralytics\n"
         )
 
-    # 1) Ensure local PT exists; if not, trigger download to cache and copy into repo
-    if not MODEL_PT_PATH.exists():
+    # 1) Ensure local PT exists; if not, trigger download to cache and copy into BASE_DIR
+    if not PT_PATH.exists():
         print("Local PT not found. Attempting to download 'yolo11n.pt' via Ultralytics...")
         # Trigger download (to cache); this requires internet
-        y = YOLO("yolo11n.pt")
+        _ = YOLO("yolo11n.pt")
         # Try to resolve an absolute path for the weight from the model if available, else scan caches
         cached = None
         try:
@@ -82,40 +78,41 @@ def ensure_onnx_model_exists() -> Path:
             raise FileNotFoundError(
                 "Ultralytics did not populate a cached yolo11n.pt. Ensure internet connectivity and retry."
             )
-        shutil.copy2(cached, MODEL_PT_PATH)
-        print(f"Cached PT found and copied to {MODEL_PT_PATH}")
+        shutil.copy2(cached, PT_PATH)
+        print(f"Cached PT found and copied to {PT_PATH}")
 
     # 2) Export ONNX from local PT
-    print(f"Exporting ONNX from {MODEL_PT_PATH} ...")
-    model = YOLO(str(MODEL_PT_PATH))
-    exported_path = model.export(
-        format="onnx",
-        imgsz=INPUT_SIZE[0],
-        opset=12,
-        dynamic=False,
-        simplify=True,
-        # Avoid assuming NMS flag support across versions; we only measure FPS anyway
-    )
-    # exported_path may be a str/Path or a list-like; normalize
+    print(f"Exporting ONNX from {PT_PATH} ...")
+    model = YOLO(str(PT_PATH))
+    prev_cwd = os.getcwd()
+    try:
+        # Ensure export drops output into BASE_DIR to avoid 'runs/' or CWD confusion
+        os.chdir(str(BASE_DIR))
+        exported_path = model.export(
+            format="onnx",
+            imgsz=INPUT_SIZE[0],
+            opset=12,
+            dynamic=False,
+            simplify=True,
+        )
+    finally:
+        os.chdir(prev_cwd)
+
+    # Normalize return and ensure file is at ONNX_PATH
+    exported_candidates = []
     if isinstance(exported_path, (list, tuple)):
         exported_candidates = [Path(p) for p in exported_path]
-    else:
-        exported_candidates = [Path(exported_path)] if exported_path else []
-
-    # Fall back to common names if return value not usable
-    if not exported_candidates:
-        exported_candidates = [
-            Path.cwd() / "yolo11n.onnx",
-            BASE_DIR / "yolo11n.onnx",
-        ]
+    elif exported_path:
+        exported_candidates = [Path(exported_path)]
+    # Also check the expected filename in BASE_DIR
+    exported_candidates += [BASE_DIR / "yolo11n.onnx"]
 
     for exported in exported_candidates:
         if exported and exported.exists():
-            MODEL_ONNX_PATH.parent.mkdir(parents=True, exist_ok=True)
-            if exported.resolve() != MODEL_ONNX_PATH.resolve():
-                exported.replace(MODEL_ONNX_PATH)
-            print(f"Exported ONNX available at {MODEL_ONNX_PATH}")
-            return MODEL_ONNX_PATH
+            if exported.resolve() != ONNX_PATH.resolve():
+                exported.replace(ONNX_PATH)
+            print(f"Exported ONNX available at {ONNX_PATH}")
+            return ONNX_PATH
 
     raise FileNotFoundError("Export finished but yolo11n.onnx not found. Check Ultralytics export logs.")
 
