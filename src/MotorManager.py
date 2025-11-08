@@ -46,6 +46,7 @@ def cleanup():
     GPIO.output( in4, GPIO.LOW )
     GPIO.cleanup()
 
+
 # the meat
 try:
     i = 0
