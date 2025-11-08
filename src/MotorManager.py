@@ -1,3 +1,5 @@
+from ftplib import print_line
+
 import RPi.GPIO as GPIO
 import time
 class MotorManager:
@@ -48,11 +50,12 @@ class MotorManager:
 
         # the meat
         try:
+
             for i in range(int_step_count):
                 for pin in range(0, len(self.pins)):
                     GPIO.output(self.pins[pin], step_sequence[motor_step_counter][pin] )
-                    motor_step_counter = (motor_step_counter - 1) % 8 if direction == True else (motor_step_counter + 1) % 8
-                    time.sleep(step_sleep)
+                motor_step_counter = (motor_step_counter - 1) % 8 if direction == True else (motor_step_counter + 1) % 8
+                time.sleep(step_sleep)
 
         except KeyboardInterrupt:
             cleanup()
