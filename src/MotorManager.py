@@ -1,9 +1,10 @@
 import RPi.GPIO as GPIO
 import time
 class MotorManager:
+
     def __init__(self, degree):
         self.degrees = degree
-        pass
+
     def runMotor(self):
         in1 = 17
         in2 = 18
