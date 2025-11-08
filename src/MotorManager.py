@@ -60,4 +60,3 @@ class MotorManager:
             exit(1)
 
         cleanup()
-        exit( 0 )
