@@ -5,4 +5,5 @@ class App:
         self.motor = MotorManager()
 
     def run(self):
+        motor.runMotor(360)
         #TODO: Implement the main loop of the application
