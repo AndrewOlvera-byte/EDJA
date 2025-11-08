@@ -23,7 +23,7 @@ halfstep_seq = [
     [1,0,0,1]
 ]
 
-def move_steps(steps, delay = 0.1):
+def move_steps(steps, delay = 0.001):
     for _ in range(steps):
         for halfstep in range(8):
             GPIO.output(IN1, halfstep_seq[halfstep][0])
