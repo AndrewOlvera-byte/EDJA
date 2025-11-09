@@ -173,7 +173,7 @@ class SchedulerWorker:
 
         while True:
             now = time.perf_counter()
-            if now >= end and steps_x_done >= Nx_abs and steps_y_done >= Ny_abs:
+            if now >= end:
                 self.eta.write(0.0)
                 break
 
