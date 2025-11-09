@@ -43,11 +43,10 @@ class SpyQueue:
         return self._q.get(timeout=timeout)
 
 
-# Monkeypatch StepperAxis to capture step timestamps for timing verification
 import time
 
 
-class TimedStepper(SW.StepperAxis):  # type: ignore[attr-defined]
+class TimedStepper(SW.StepperAxis): 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.times = []
@@ -60,7 +59,7 @@ class TimedStepper(SW.StepperAxis):  # type: ignore[attr-defined]
             pass
 
 
-SW.StepperAxis = TimedStepper  # type: ignore[attr-defined]
+SW.StepperAxis = TimedStepper 
 
 
 def _measurement_from_pixels(cx: float, cy: float, W: int, H: int, fov_x_rad: float, fov_y_rad: float):
@@ -221,8 +220,7 @@ def main() -> None:
     assert eta.read() == 0.0, "ETA not zero after burst completion"
     print("[Script] Scheduler burst completed (ETA returned to 0)")
 
-    # Note: Using real StepperAxis and GPIO. Visual verification is expected here.
-    # We keep direction/magnitude checks on the command produced by Control:
+
     if mm.Nx != 0 and Nx_cap != 0:
         print(f"[Script] Direction check yaw OK: sign={('+' if mm.Nx>0 else '-')} target={('+' if Nx_cap>0 else '-')}")
     if mm.Ny != 0 and Ny_cap != 0:
@@ -248,7 +246,7 @@ def main() -> None:
     except Exception:
         pass
     try:
-        SW.GPIO.cleanup()  # type: ignore[attr-defined]
+        SW.GPIO.cleanup()
     except Exception:
         pass
 

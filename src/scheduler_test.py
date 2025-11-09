@@ -25,8 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from shared import MicroMove, SchedulerETA, create_move_queue  # noqa: E402
-from scheduler_worker import SchedulerConfig, SchedulerWorker  # noqa: E402
+from shared import MicroMove, SchedulerETA, create_move_queue
+from scheduler_worker import SchedulerConfig, SchedulerWorker
 
 
 def main() -> None:

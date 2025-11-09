@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
 try:
-    from .shared import LatestDetectionMailbox, MicroMove, PredState, SchedulerETA  # type: ignore
+    from .shared import LatestDetectionMailbox, MicroMove, PredState, SchedulerETA
 except Exception:
-    from shared import LatestDetectionMailbox, MicroMove, PredState, SchedulerETA  # type: ignore
+    from shared import LatestDetectionMailbox, MicroMove, PredState, SchedulerETA
 
 
 @dataclass
@@ -34,7 +34,7 @@ class ControlConfig:
 
 class ControlWorker:
     """
-    α–β filter + latency-aware prediction, PID, and quantization to MicroMove.
+    α–β filter + latency-aware prediction, PID, and quantization to MicroMove
     """
 
     def __init__(
@@ -75,7 +75,7 @@ class ControlWorker:
                 pass
 
     def _measurement_from_pixels(self, cx: float, cy: float, W: int, H: int) -> Tuple[float, float]:
-        # Small-angle linear mapping around optical axis
+        # Small-angle linear mapping
         ex = ((cx - (W / 2.0)) / (W / 2.0)) * (self.cfg.fov_x_rad / 2.0)
         ey = ((cy - (H / 2.0)) / (H / 2.0)) * (self.cfg.fov_y_rad / 2.0)
         return ex, ey
@@ -131,7 +131,7 @@ class ControlWorker:
                 dt_x = max(1e-6, now - self.state_x.t)
                 dt_y = max(1e-6, now - self.state_y.t)
                 self.state_x.x += self.state_x.v * dt_x
-                self.state_y.x += self.state_y.v * dt_y  # type: ignore[attr-defined]
+                self.state_y.x += self.state_y.v * dt_y
                 self.state_x.t = now
                 self.state_y.t = now
 
@@ -149,12 +149,12 @@ class ControlWorker:
                     zx, zy = self._measurement_from_pixels(det.cx, det.cy, det.W, det.H)
                     # Residuals
                     rx = zx - self.state_x.x
-                    ry = zy - self.state_y.x  # type: ignore[attr-defined]
+                    ry = zy - self.state_y.x
                     # α–β update (less aggressive on Y to reduce jitter)
                     alpha_y = self.cfg.alpha * 0.8
                     beta_y = self.cfg.beta * 0.8
                     self.state_x.x += self.cfg.alpha * rx
-                    self.state_y.x += alpha_y * ry  # type: ignore[attr-defined]
+                    self.state_y.x += alpha_y * ry
                     self.state_x.v += (self.cfg.beta / dt_x) * rx
                     self.state_y.v = getattr(self.state_y, "v", 0.0) + (beta_y / dt_y) * ry  # ensure v exists
                     self._seq_last = seq

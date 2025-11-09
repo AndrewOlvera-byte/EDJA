@@ -6,21 +6,20 @@ from typing import Any, Dict
 
 import RPi.GPIO as GPIO
 
-# Allow running as `python src/App.py` by adding this directory to sys.path
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from shared import LatestDetectionMailbox, SchedulerETA, create_move_queue  # noqa: E402
-from vision_worker import VisionConfig, VisionWorker  # noqa: E402
-from scheduler_worker import SchedulerConfig, SchedulerWorker  # noqa: E402
-from control_worker import ControlConfig, ControlWorker  # noqa: E402
-from shared import CsvEventLogger  # noqa: E402
+from shared import LatestDetectionMailbox, SchedulerETA, create_move_queue
+from vision_worker import VisionConfig, VisionWorker
+from scheduler_worker import SchedulerConfig, SchedulerWorker
+from control_worker import ControlConfig, ControlWorker
+from shared import CsvEventLogger
 
 
 class App:
     def __init__(self, config_path: str = "config/config.yaml"):
-        # Hardcoded configuration (no YAML)
+        # Hardcoded configuration
         self.cfg = self._default_config()
 
         # Shared containers

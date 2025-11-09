@@ -9,14 +9,14 @@ import numpy as np
 import onnxruntime as ort
 
 try:
-    from picamera2 import Picamera2  # type: ignore
+    from picamera2 import Picamera2
     _PICAM_AVAILABLE = True
 except Exception:
     _PICAM_AVAILABLE = False
 
 from shared import Detection, LatestDetectionMailbox
 try:
-    # When running as package (python -m src.App)
+    # When running as package
     from .vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections, draw_detections  # type: ignore
 except Exception:
     # When running as script with src on sys.path

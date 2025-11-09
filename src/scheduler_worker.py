@@ -9,9 +9,9 @@ import RPi.GPIO as GPIO
 import logging
 
 try:
-    from .shared import MicroMove, SchedulerETA  # type: ignore
+    from .shared import MicroMove, SchedulerETA
 except Exception:
-    from shared import MicroMove, SchedulerETA  # type: ignore
+    from shared import MicroMove, SchedulerETA
 
 
 _STEP_SEQUENCE = [
