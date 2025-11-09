@@ -30,6 +30,7 @@ class VisionConfig:
     input_size: Tuple[int, int]
     conf_min: float
     target_cls: int
+    rotate_180: bool = False
 
 
 class VisionWorker:
@@ -76,15 +77,18 @@ class VisionWorker:
     def _capture_rgb(self) -> Tuple[np.ndarray, int, int]:
         if _PICAM_AVAILABLE and hasattr(self._camera, "capture_array"):
             frame_rgb = self._camera.capture_array()  # RGB
-            H, W = frame_rgb.shape[:2]
-            return frame_rgb, W, H
         else:
             ok, frame_bgr = self._camera.read()
             if not ok or frame_bgr is None:
                 raise RuntimeError("Failed to capture frame from camera")
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            H, W = frame_rgb.shape[:2]
-            return frame_rgb, W, H
+
+        if self.cfg.rotate_180:
+            # Flip both axes for 180-degree rotation
+            frame_rgb = cv2.rotate(frame_rgb, cv2.ROTATE_180)
+
+        H, W = frame_rgb.shape[:2]
+        return frame_rgb, W, H
 
     def _pick_target(self, dets_xyxy: np.ndarray, scale_x: float, scale_y: float) -> Optional[Tuple[float, float, float, int]]:
         """
