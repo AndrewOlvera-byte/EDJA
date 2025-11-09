@@ -225,23 +225,32 @@ class SchedulerWorker:
 
     def run_loop(self, stop_event: Optional[Any] = None) -> None:
         try:
-            while True:
-                if stop_event is not None and stop_event.is_set():
-                    break
+            try:
+                while True:
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                    try:
+                        # Small timeout so we can update ETA to 0 when idle
+                        cmd: MicroMove = self.queue.get(timeout=0.05)
+                    except Exception:
+                        self.eta.write(0.0)
+                        continue
+                    self._run_burst(cmd)
+            finally:
+                # Ensure outputs low
+                for p in list(self.cfg.yaw_pins) + list(self.cfg.pitch_pins):
+                    try:
+                        GPIO.output(p, GPIO.LOW)
+                    except Exception:
+                        pass
                 try:
-                    # Small timeout so we can update ETA to 0 when idle
-                    cmd: MicroMove = self.queue.get(timeout=0.05)
-                except Exception:
-                    self.eta.write(0.0)
-                    continue
-                self._run_burst(cmd)
-        finally:
-            # Ensure outputs low
-            for p in list(self.cfg.yaw_pins) + list(self.cfg.pitch_pins):
-                try:
-                    GPIO.output(p, GPIO.LOW)
+                    GPIO.cleanup()
                 except Exception:
                     pass
+        except Exception as e:
+            import traceback
+            print("[Scheduler] crashed:", e)
+            traceback.print_exc()
             try:
                 GPIO.cleanup()
             except Exception:

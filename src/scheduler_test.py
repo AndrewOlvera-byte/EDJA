@@ -35,7 +35,12 @@ def main() -> None:
     stop = False
 
     def run_sched():
-        sched.run_loop()
+        try:
+            sched.run_loop()
+        except Exception as e:
+            import traceback
+            print("[Scheduler] crashed:", e)
+            traceback.print_exc()
 
     import threading
 
