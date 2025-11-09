@@ -139,7 +139,7 @@ def main() -> None:
 
     # Create one fake detection that is off-center in both axes
     W, H = 640, 640
-    cx_px, cy_px = 0.75 * W, 0.35 * H  # right and above center => ex > 0, ey > 0
+    cx_px, cy_px = 0.9 * W, 0.2 * H  # right and above center => ex > 0, ey > 0
     now = time.perf_counter()
     det = Detection(
         t_cap=now,
