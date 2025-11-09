@@ -16,6 +16,7 @@ from shared import LatestDetectionMailbox, SchedulerETA, create_move_queue  # no
 from vision_worker import VisionConfig, VisionWorker  # noqa: E402
 from scheduler_worker import SchedulerConfig, SchedulerWorker  # noqa: E402
 from control_worker import ControlConfig, ControlWorker  # noqa: E402
+from shared import CsvEventLogger  # noqa: E402
 
 
 class App:
@@ -27,6 +28,17 @@ class App:
         self.mailbox = LatestDetectionMailbox()
         self.move_queue = create_move_queue(maxsize=4)
         self.eta = SchedulerETA()
+        # Logger
+        self.logger = None
+        try:
+            log_cfg = self.cfg.get("logging", {})
+            if bool(log_cfg.get("enabled", True)):
+                from pathlib import Path as _P
+                csv_path = str(self._resolve_path(log_cfg.get("csv_path", "logs/edja_events.csv")))
+                self.logger = CsvEventLogger(csv_path)
+                print(f"[App] CSV logging enabled at {csv_path}")
+        except Exception:
+            self.logger = None
 
         # Workers
         self.vision = VisionWorker(
@@ -38,6 +50,7 @@ class App:
                 target_cls=int(self.cfg["vision"].get("target_cls", 0)),
             ),
             mailbox=self.mailbox,
+            logger=self.logger,
         )
 
         self.scheduler = SchedulerWorker(
@@ -53,6 +66,7 @@ class App:
             ),
             move_queue=self.move_queue,
             eta=self.eta,
+            logger=self.logger,
         )
 
         # Control config requires FOV radians and limits
@@ -79,14 +93,59 @@ class App:
             det_mailbox=self.mailbox,
             move_queue=self.move_queue,
             eta=self.eta,
+            logger=self.logger,
         )
 
         self._stop_event = threading.Event()
         self._threads = [
-            threading.Thread(target=self.vision.run_loop, kwargs={"stop_event": self._stop_event, "fps_overlay": False}, daemon=True),
-            threading.Thread(target=self.scheduler.run_loop, kwargs={"stop_event": self._stop_event}, daemon=True),
-            threading.Thread(target=self.control.run_loop, kwargs={"stop_event": self._stop_event}, daemon=True),
+            threading.Thread(
+                target=self._run_with_logs,
+                args=("Vision", self.vision.run_loop),
+                kwargs={
+                    "stop_event": self._stop_event,
+                    # Show window by default on Pi for debugging
+                    "fps_overlay": bool(self.cfg.get("vision", {}).get("show_window", True)),
+                },
+                daemon=True,
+            ),
+            threading.Thread(
+                target=self._run_with_logs,
+                args=("Scheduler", self.scheduler.run_loop),
+                kwargs={"stop_event": self._stop_event},
+                daemon=True,
+            ),
+            threading.Thread(
+                target=self._run_with_logs,
+                args=("Control", self.control.run_loop),
+                kwargs={"stop_event": self._stop_event},
+                daemon=True,
+            ),
         ]
+
+    def _run_with_logs(self, name: str, fn, **kwargs) -> None:
+        print(f"[{name}] starting")
+        if self.logger is not None:
+            try:
+                self.logger.log(name, "start", f"kwargs={list(kwargs.keys())}")
+            except Exception:
+                pass
+        try:
+            fn(**kwargs)
+            print(f"[{name}] exited")
+            if self.logger is not None:
+                try:
+                    self.logger.log(name, "exit", "normal")
+                except Exception:
+                    pass
+        except Exception as e:
+            import traceback
+            print(f"[{name}] crashed: {e}")
+            traceback.print_exc()
+            if self.logger is not None:
+                try:
+                    self.logger.log(name, "crash", f"{type(e).__name__}: {e}")
+                except Exception:
+                    pass
 
     def _resolve_path(self, p: str) -> Path:
         path = Path(p)
@@ -103,6 +162,7 @@ class App:
                 "conf_min": 0.25,
                 "target_cls": 0,
                 "fov_deg": {"x": 54.0, "y": 41.0},
+                "show_window": True,
             },
             "control": {
                 "tick_hz": 150,
@@ -128,6 +188,10 @@ class App:
                 "pitch_cw_positive": False,
             },
             "gpio": {"mode": "BCM"},
+            "logging": {
+                "enabled": True,
+                "csv_path": "logs/edja_events.csv",
+            },
         }
 
     def _load_config(self, path_str: str) -> Dict[str, Any]:

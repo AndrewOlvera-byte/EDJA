@@ -17,10 +17,10 @@ except Exception:
 from shared import Detection, LatestDetectionMailbox
 try:
     # When running as package (python -m src.App)
-    from .vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections  # type: ignore
+    from .vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections, draw_detections  # type: ignore
 except Exception:
     # When running as script with src on sys.path
-    from vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections  # type: ignore
+    from vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections, draw_detections  # type: ignore
 
 
 @dataclass
@@ -37,12 +37,21 @@ class VisionWorker:
     Capture frames, run ONNX inference, pick target, write latest Detection.
     """
 
-    def __init__(self, cfg: VisionConfig, mailbox: LatestDetectionMailbox) -> None:
+    def __init__(self, cfg: VisionConfig, mailbox: LatestDetectionMailbox, logger: Optional[Any] = None) -> None:
         self.cfg = cfg
         self.mailbox = mailbox
+        self.logger = logger
         self._session = self._create_session()
         self._input_name = self._session.get_inputs()[0].name
         self._camera = self._open_camera()
+        # Setup summary print
+        cam_kind = "Picamera2" if _PICAM_AVAILABLE else "OpenCV-USB"
+        print(f"[Vision] setup: onnx='{self.cfg.onnx_path}', providers={self.cfg.providers}, input_size={self.cfg.input_size}, camera={cam_kind}")
+        if self.logger is not None:
+            try:
+                self.logger.log("Vision", "setup", f"onnx={self.cfg.onnx_path}, providers={self.cfg.providers}, input={self.cfg.input_size}, camera={cam_kind}")
+            except Exception:
+                pass
 
     def _create_session(self) -> ort.InferenceSession:
         return ort.InferenceSession(
@@ -107,9 +116,14 @@ class VisionWorker:
         input_w, input_h = self.cfg.input_size
         fps_smooth: Optional[float] = None
         window_name = "Vision (FPS)"
-        if fps_overlay and not _PICAM_AVAILABLE:
-            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(window_name, 960, 720)
+        if fps_overlay:
+            try:
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window_name, 960, 720)
+            except Exception:
+                # If window creation fails (e.g., no display), continue headless
+                fps_overlay = False
+        last_print_t = time.perf_counter()
 
         try:
             while True:
@@ -144,8 +158,27 @@ class VisionWorker:
                     )
                     self.mailbox.write(det)
 
-                # Optional FPS overlay (OpenCV only)
-                if fps_overlay and not _PICAM_AVAILABLE:
+                # Periodic print/log
+                now = time.perf_counter()
+                if (now - last_print_t) >= 1.0:
+                    if picked is not None:
+                        print(f"[Vision] frame {W}x{H}, dets={int(dets.shape[0])}, picked: cls={cls} conf={conf:.2f} at ({int(cx_px)},{int(cy_px)})")
+                        if self.logger is not None:
+                            try:
+                                self.logger.log("Vision", "detection", f"W={W} H={H} N={int(dets.shape[0])} cls={cls} conf={conf:.3f} cx={cx_px:.1f} cy={cy_px:.1f}")
+                            except Exception:
+                                pass
+                    else:
+                        print(f"[Vision] frame {W}x{H}, dets=0, no target")
+                        if self.logger is not None:
+                            try:
+                                self.logger.log("Vision", "no_target", f"W={W} H={H} N=0")
+                            except Exception:
+                                pass
+                    last_print_t = now
+
+                # Optional FPS/detections overlay (supports both Picamera2 and OpenCV)
+                if fps_overlay:
                     dt = max(1e-6, time.perf_counter() - t_cap)
                     fps_instant = 1.0 / dt
                     if fps_smooth is None:
@@ -153,6 +186,12 @@ class VisionWorker:
                     else:
                         fps_smooth = fps_smooth * 0.9 + fps_instant * 0.1
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    # Draw detections (in model input space scaled to original)
+                    if dets is not None and dets.size > 0:
+                        try:
+                            draw_detections(frame_bgr, dets, scale_x, scale_y)
+                        except Exception:
+                            pass
                     cv2.putText(
                         frame_bgr,
                         f"FPS: {fps_smooth:.2f}",
@@ -167,7 +206,7 @@ class VisionWorker:
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
         finally:
-            if fps_overlay and not _PICAM_AVAILABLE:
+            if fps_overlay:
                 cv2.destroyAllWindows()
             # Stop camera if picamera2
             if _PICAM_AVAILABLE and hasattr(self._camera, "stop"):

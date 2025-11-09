@@ -43,11 +43,13 @@ class ControlWorker:
         det_mailbox: LatestDetectionMailbox,
         move_queue,
         eta: SchedulerETA,
+        logger: Optional[Any] = None,
     ) -> None:
         self.cfg = cfg
         self.det_mailbox = det_mailbox
         self.move_queue = move_queue
         self.eta = eta
+        self.logger = logger
         now = time.perf_counter()
         self.state_x = PredState(0.0, 0.0, now)
         self.state_y = PredState(0.0, 0.0, now)
@@ -57,6 +59,12 @@ class ControlWorker:
         self._x_prev = 0.0
         self._y_prev = 0.0
         self._steps_per_rad = float(cfg.steps_per_rev) / (2.0 * math.pi)
+        print(f"[Control] setup: tick_hz={cfg.tick_hz}, kp={cfg.kp}, kd={cfg.kd}, ki={cfg.ki}, deadband_steps={cfg.deadband_steps}")
+        if self.logger is not None:
+            try:
+                self.logger.log("Control", "setup", f"tick_hz={cfg.tick_hz} kp={cfg.kp} kd={cfg.kd} ki={cfg.ki} deadband={cfg.deadband_steps}")
+            except Exception:
+                pass
 
     def _measurement_from_pixels(self, cx: float, cy: float, W: int, H: int) -> Tuple[float, float]:
         # Small-angle linear mapping around optical axis
@@ -155,9 +163,20 @@ class ControlWorker:
                 if mm is not None:
                     try:
                         self.move_queue.put_nowait(mm)
+                        print(f"[Control] enqueued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.3f}s")
+                        if self.logger is not None:
+                            try:
+                                self.logger.log("Control", "enqueue_mm", f"Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.4f}")
+                            except Exception:
+                                pass
                     except Exception:
                         # Queue full: drop this command (latest will replace soon)
-                        pass
+                        print("[Control] move_queue full, dropping MicroMove")
+                        if self.logger is not None:
+                            try:
+                                self.logger.log("Control", "queue_full", "drop MicroMove")
+                            except Exception:
+                                pass
 
                 # Sleep to maintain tick rate
                 next_tick = time.perf_counter() + tick_dt

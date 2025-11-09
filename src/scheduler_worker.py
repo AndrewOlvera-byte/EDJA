@@ -61,13 +61,20 @@ class SchedulerWorker:
     emits steps so both axes finish together in T.
     """
 
-    def __init__(self, cfg: SchedulerConfig, move_queue, eta: SchedulerETA) -> None:
+    def __init__(self, cfg: SchedulerConfig, move_queue, eta: SchedulerETA, logger: Optional[Any] = None) -> None:
         self.cfg = cfg
         self.queue = move_queue
         self.eta = eta
+        self.logger = logger
         self._setup_gpio()
         self.yaw = StepperAxis(cfg.yaw_pins, cfg.yaw_cw_positive)
         self.pitch = StepperAxis(cfg.pitch_pins, cfg.pitch_cw_positive)
+        print(f"[Scheduler] setup: tick_hz={cfg.tick_hz}, Smax={cfg.s_max_steps_s}, Amax={cfg.a_max_steps_s2}, BCM={cfg.gpio_mode_bcm}")
+        if self.logger is not None:
+            try:
+                self.logger.log("Scheduler", "setup", f"tick_hz={cfg.tick_hz} Smax={cfg.s_max_steps_s} Amax={cfg.a_max_steps_s2} BCM={cfg.gpio_mode_bcm}")
+            except Exception:
+                pass
 
     def _setup_gpio(self) -> None:
         GPIO.setwarnings(False)
@@ -111,6 +118,12 @@ class SchedulerWorker:
         Nx = int(cmd.Nx)
         Ny = int(cmd.Ny)
         T = float(cmd.T)
+        print(f"[Scheduler] run_burst: Nx={Nx} Ny={Ny} T={T:.4f}s")
+        if self.logger is not None:
+            try:
+                self.logger.log("Scheduler", "run_burst", f"Nx={Nx} Ny={Ny} T={T:.4f}")
+            except Exception:
+                pass
 
         Nx_abs = abs(Nx)
         Ny_abs = abs(Ny)
@@ -202,6 +215,13 @@ class SchedulerWorker:
             self.pitch.step_once(dir_y_pos)
             time.sleep(tick_dt)
         self.eta.write(0.0)
+        if flush_remaining > 0 or (max(0, Nx_abs - steps_x_done) > 0):
+            print("[Scheduler] flush_remaining steps completed")
+        if self.logger is not None:
+            try:
+                self.logger.log("Scheduler", "burst_done", f"Nx_done={steps_x_done}/{Nx_abs} Ny_done={steps_y_done}/{Ny_abs}")
+            except Exception:
+                pass
 
     def run_loop(self, stop_event: Optional[Any] = None) -> None:
         try:
