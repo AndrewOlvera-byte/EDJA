@@ -226,13 +226,18 @@ def main() -> None:
     if mm.Ny != 0 and Ny_cap != 0:
         print(f"[Script] Direction check pitch OK: sign={('+' if mm.Ny>0 else '-')} target={('+' if Ny_cap>0 else '-')}")
 
-    # Simultaneity window and duration close to planned T
-    if getattr(sched.yaw, "times", None) and getattr(sched.pitch, "times", None):
-        win_start = min(sched.yaw.times[0], sched.pitch.times[0])
-        win_end = max(sched.yaw.times[-1], sched.pitch.times[-1])
-        dur = win_end - win_start
-        # Host timing jitter tolerance
-        assert abs(dur - T) <= max(0.05, 0.3 * T), f"Burst duration {dur:.3f}s deviates from T={T:.3f}s"
+    # Capture start marker just before enqueue
+t_mark = time.perf_counter()
+base_q.put_nowait(mm)
+
+# ... after completion ...
+y_times = [t for t in getattr(sched.yaw, "times", []) if t >= t_mark]
+p_times = [t for t in getattr(sched.pitch, "times", []) if t >= t_mark]
+if y_times and p_times:
+    win_start = min(y_times[0], p_times[0])
+    win_end   = max(y_times[-1], p_times[-1])
+    dur = win_end - win_start
+    assert abs(dur - T) <= max(0.05, 0.3 * T), f"..."
 
     # Cleanup
     sched_stop.set()
