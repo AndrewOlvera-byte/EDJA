@@ -164,16 +164,16 @@ class App:
                 "show_window": True,
             },
             "control": {
-                # Slightly slower loop; add damping and velocity estimate for smoothness
-                "tick_hz": 120,
+                # Pace control near camera cadence; add damping and velocity estimate
+                "tick_hz": 90,
                 "alpha": 1.0,
-                "beta": 0.2,
-                "kp": 1.6,
-                "kd": 0.25,
+                "beta": 0.25,
+                "kp": 1.4,
+                "kd": 0.35,
                 "ki": 0.0,
                 "deadband_steps": 3,
-                # Longer burst window allows fewer, smoother bursts
-                "micro_move_T_ms": 350.0,
+                # Burst duration aligned to ~6–10 FPS (100–166 ms)
+                "micro_move_T_ms": 140.0,
                 "tau0_ms": 0.0,
             },
             "scheduler": {

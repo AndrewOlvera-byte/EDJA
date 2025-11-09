@@ -59,6 +59,10 @@ class ControlWorker:
         self._x_prev = 0.0
         self._y_prev = 0.0
         self._steps_per_rad = float(cfg.steps_per_rev) / (2.0 * math.pi)
+        # Track last issued detection seq to pace commands
+        self._seq_last_issued = -1
+        # Dynamic detection latency estimate (s)
+        self._tau_det_s = 0.0
         print(f"[Control] setup: tick_hz={cfg.tick_hz}, kp={cfg.kp}, kd={cfg.kd}, ki={cfg.ki}, deadband_steps={cfg.deadband_steps}")
         if self.logger is not None:
             try:
@@ -127,6 +131,9 @@ class ControlWorker:
                 # Measurement update if new detection and confident
                 det, seq = self.det_mailbox.read()
                 if det is not None and seq != self._seq_last and det.conf >= self.cfg.conf_min:
+                    # Estimate detection/inference latency up to now (seconds)
+                    # Prefer inference completion time as reference
+                    self._tau_det_s = max(0.0, now - float(det.t_inf))
                     zx, zy = self._measurement_from_pixels(det.cx, det.cy, det.W, det.H)
                     # Residuals
                     rx = zx - self.state_x.x
@@ -140,7 +147,8 @@ class ControlWorker:
 
                 # Latency-aware prediction
                 eta_s = self.eta.read()
-                tau = tau0_s + eta_s
+                # Base tau: constant + dynamic detection/inference latency + current scheduler ETA
+                tau = tau0_s + self._tau_det_s + eta_s
                 xpred = self.state_x.x + self.state_x.v * tau
                 ypred = getattr(self.state_y, "x", 0.0) + getattr(self.state_y, "v", 0.0) * tau
 
@@ -159,11 +167,20 @@ class ControlWorker:
                 self._Ix = max(-clamp, min(clamp, self._Ix))
                 self._Iy = max(-clamp, min(clamp, self._Iy))
 
-                # Quantize and cap
+                # Quantize and cap; set explicit burst duration aligned to camera fps
                 mm = self._quantize_and_cap(ux, uy, T_burst)
-                if mm is not None:
+                # Gating: issue a command only on new detection, or near end of current burst
+                should_issue = False
+                if det is not None and self._seq_last_issued != self._seq_last:
+                    should_issue = True
+                elif eta_s <= 0.02:  # ~20 ms from end
+                    should_issue = True
+                if mm is not None and should_issue:
+                    # Use fixed T so scheduler paces to the frame cadence
+                    mm = type(mm)(Nx=mm.Nx, Ny=mm.Ny, T=T_burst)
                     try:
                         self.move_queue.put_nowait(mm)
+                        self._seq_last_issued = self._seq_last
                         t_label = mm.T if mm.T is not None else "auto"
                         print(f"[Control] enqueued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
                         if self.logger is not None:
