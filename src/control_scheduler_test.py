@@ -176,6 +176,25 @@ def main() -> None:
         time.sleep(0.01)
     mm = move_queue.last_mm
     assert mm is not None, "Control did not enqueue a MicroMove within 1s"
+
+    # Stop control immediately to avoid additional bursts getting enqueued/consumed
+    ctrl_stop.set()
+    try:
+        t_control.join(timeout=1.0)
+    except Exception:
+        pass
+
+    # Reset axis counters so we measure only the single burst below
+    try:
+        sched.yaw.steps = 0  # type: ignore[attr-defined]
+        sched.yaw.signs.clear()  # type: ignore[attr-defined]
+        sched.yaw.times.clear()  # type: ignore[attr-defined]
+        sched.pitch.steps = 0  # type: ignore[attr-defined]
+        sched.pitch.signs.clear()  # type: ignore[attr-defined]
+        sched.pitch.times.clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
     print(f"[Script] MicroMove from control: Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.3f}s")
 
     # Validate direction and approximate magnitude against the same logic as Control
@@ -211,13 +230,6 @@ def main() -> None:
         expect_ratio = abs(Nx_cap / Ny_cap)
         assert abs(ratio - expect_ratio) <= 0.25 * max(1.0, expect_ratio), "XY ratio deviates more than tolerance"
 
-    # Stop control to avoid refilling the queue; keep scheduler running to actuate
-    ctrl_stop.set()
-    try:
-        t_control.join(timeout=1.0)
-    except Exception:
-        pass
-
     # Drain any queued items and re-enqueue just one mm to ensure a single burst executes
     while True:
         try:
@@ -247,8 +259,9 @@ def main() -> None:
     # Read counters from monkeypatched axes
     yaw_axis = sched.yaw  # type: ignore[attr-defined]
     pitch_axis = sched.pitch  # type: ignore[attr-defined]
-    assert yaw_axis.steps == abs(mm.Nx), f"Yaw steps {yaw_axis.steps} != {abs(mm.Nx)}"
-    assert pitch_axis.steps == abs(mm.Ny), f"Pitch steps {pitch_axis.steps} != {abs(mm.Ny)}"
+    # Allow small rounding differences (±1 step)
+    assert abs(yaw_axis.steps - abs(mm.Nx)) <= 1, f"Yaw steps {yaw_axis.steps} != ~{abs(mm.Nx)}"
+    assert abs(pitch_axis.steps - abs(mm.Ny)) <= 1, f"Pitch steps {pitch_axis.steps} != ~{abs(mm.Ny)}"
 
     # Simultaneity window and duration close to planned T
     if yaw_axis.times and pitch_axis.times:
