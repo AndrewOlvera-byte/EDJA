@@ -48,7 +48,6 @@ class App:
                 input_size=tuple(self.cfg["vision"].get("input_size", [640, 640])),
                 conf_min=float(self.cfg["vision"].get("conf_min", 0.25)),
                 target_cls=int(self.cfg["vision"].get("target_cls", 0)),
-                rotate_180=bool(self.cfg["vision"].get("rotate_180", False)),
             ),
             mailbox=self.mailbox,
             logger=self.logger,
@@ -164,7 +163,6 @@ class App:
                 "target_cls": 0,
                 "fov_deg": {"x": 54.0, "y": 41.0},
                 "show_window": True,
-                "rotate_180": False,
             },
             "control": {
                 "tick_hz": 150,

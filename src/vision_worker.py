@@ -30,7 +30,6 @@ class VisionConfig:
     input_size: Tuple[int, int]
     conf_min: float
     target_cls: int
-    rotate_180: bool = False
 
 
 class VisionWorker:
@@ -82,11 +81,6 @@ class VisionWorker:
             if not ok or frame_bgr is None:
                 raise RuntimeError("Failed to capture frame from camera")
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-
-        if self.cfg.rotate_180:
-            # Flip both axes for 180-degree rotation
-            frame_rgb = cv2.rotate(frame_rgb, cv2.ROTATE_180)
-
         H, W = frame_rgb.shape[:2]
         return frame_rgb, W, H
 
@@ -206,7 +200,9 @@ class VisionWorker:
                         2,
                         cv2.LINE_AA,
                     )
-                    cv2.imshow(window_name, frame_bgr)
+                    # Rotate only for display after overlays so boxes rotate with the image
+                    display_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+                    cv2.imshow(window_name, display_bgr)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
         finally:

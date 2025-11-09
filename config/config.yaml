@@ -4,7 +4,6 @@ vision:
   input_size: [640, 640]
   conf_min: 0.25
   target_cls: 0
-  rotate_180: true
   fov_deg: { x: 54.0, y: 41.0 }
 
 control:
