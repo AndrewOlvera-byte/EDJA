@@ -77,7 +77,7 @@ class ControlWorker:
     def _measurement_from_pixels(self, cx: float, cy: float, W: int, H: int) -> Tuple[float, float]:
         # Small-angle linear mapping around optical axis
         ex = ((cx - (W / 2.0)) / (W / 2.0)) * (self.cfg.fov_x_rad / 2.0)
-        ey = -((cy - (H / 2.0)) / (H / 2.0)) * (self.cfg.fov_y_rad / 2.0)
+        ey = ((cy - (H / 2.0)) / (H / 2.0)) * (self.cfg.fov_y_rad / 2.0)
         return ex, ey
 
     def _feasible_steps_for_T(self, T: float) -> int:
