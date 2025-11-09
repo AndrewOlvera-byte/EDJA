@@ -25,7 +25,7 @@ class App:
 
         # Shared containers
         self.mailbox = LatestDetectionMailbox()
-        self.move_queue = create_move_queue(maxsize=4)
+        self.move_queue = create_move_queue(maxsize=1)
         self.eta = SchedulerETA()
         # Logger
         self.logger = None
@@ -158,7 +158,7 @@ class App:
                 "onnx_path": "src/yolo11n.onnx",
                 "providers": ["CPUExecutionProvider"],
                 "input_size": [640, 640],
-                "conf_min": 0.25,
+                "conf_min": 0.10,
                 "target_cls": 0,
                 "fov_deg": {"x": 54.0, "y": 41.0},
                 "show_window": True,
@@ -166,21 +166,21 @@ class App:
             "control": {
                 # Pace control near camera cadence; add damping and velocity estimate
                 "tick_hz": 90,
-                "alpha": 1.0,
-                "beta": 0.25,
-                "kp": 1.4,
-                "kd": 0.35,
+                "alpha": 0.6,
+                "beta": 0.08,
+                "kp": 0.9,
+                "kd": 0.15,
                 "ki": 0.0,
-                "deadband_steps": 3,
-                # Burst duration aligned to ~6–10 FPS (100–166 ms)
-                "micro_move_T_ms": 140.0,
-                "tau0_ms": 0.0,
+                "deadband_steps": 6,
+                # Burst duration will be dynamically matched to detection fps; this is fallback
+                "micro_move_T_ms": 130.0,
+                "tau0_ms": 60.0,
             },
             "scheduler": {
-                # Lower max speed/accel for slower, smoother movement
+                # Lower max speed/accel for smoother movement
                 "tick_hz": 1200,
-                "s_max_steps_s": 220,
-                "a_max_steps_s2": 1200,
+                "s_max_steps_s": 140,
+                "a_max_steps_s2": 700,
             },
             "stepper": {
                 "steps_per_rev": 4096,

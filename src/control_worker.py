@@ -63,6 +63,10 @@ class ControlWorker:
         self._seq_last_issued = -1
         # Dynamic detection latency estimate (s)
         self._tau_det_s = 0.0
+        # Detection fps tracking for burst sync
+        self._det_dt_ema = 0.13  # seconds
+        self._det_t_last = None
+        self._last_det_conf = cfg.conf_min
         print(f"[Control] setup: tick_hz={cfg.tick_hz}, kp={cfg.kp}, kd={cfg.kd}, ki={cfg.ki}, deadband_steps={cfg.deadband_steps}")
         if self.logger is not None:
             try:
@@ -112,7 +116,7 @@ class ControlWorker:
     def run_loop(self, stop_event: Optional[Any] = None) -> None:
         tick_dt = 1.0 / max(1.0, self.cfg.tick_hz)
         tau0_s = self.cfg.tau0_ms / 1000.0
-        T_burst = self.cfg.micro_move_T_ms / 1000.0
+        T_burst_fallback = self.cfg.micro_move_T_ms / 1000.0
 
         try:
             while True:
@@ -134,6 +138,11 @@ class ControlWorker:
                     # Estimate detection/inference latency up to now (seconds)
                     # Prefer inference completion time as reference
                     self._tau_det_s = max(0.0, now - float(det.t_inf))
+                    # Update detection period EMA for sync
+                    if self._det_t_last is not None:
+                        dt_det = max(1e-3, float(det.t_cap) - float(self._det_t_last))
+                        self._det_dt_ema = (self._det_dt_ema * 0.8) + (dt_det * 0.2)
+                    self._det_t_last = float(det.t_cap)
                     zx, zy = self._measurement_from_pixels(det.cx, det.cy, det.W, det.H)
                     # Residuals
                     rx = zx - self.state_x.x
@@ -144,6 +153,7 @@ class ControlWorker:
                     self.state_x.v += (self.cfg.beta / dt_x) * rx
                     self.state_y.v = getattr(self.state_y, "v", 0.0) + (self.cfg.beta / dt_y) * ry  # ensure v exists
                     self._seq_last = seq
+                    self._last_det_conf = float(det.conf)
 
                 # Latency-aware prediction
                 eta_s = self.eta.read()
@@ -152,14 +162,20 @@ class ControlWorker:
                 xpred = self.state_x.x + self.state_x.v * tau
                 ypred = getattr(self.state_y, "x", 0.0) + getattr(self.state_y, "v", 0.0) * tau
 
-                # PID (D on measurement derivative)
+                # PID (D on measurement derivative) with confidence-scaled gains
                 dx = (self.state_x.x - self._x_prev) / max(1e-6, dt_x)
                 dy = (getattr(self.state_y, "x", 0.0) - self._y_prev) / max(1e-6, dt_y)
                 self._x_prev = self.state_x.x
                 self._y_prev = getattr(self.state_y, "x", 0.0)
 
-                ux = self.cfg.kp * xpred + self._Ix - self.cfg.kd * dx
-                uy = self.cfg.kp * ypred + self._Iy - self.cfg.kd * dy
+                # Map confidence (conf_min..1.0) -> scale (0.5..1.0)
+                conf_norm = (self._last_det_conf - self.cfg.conf_min) / max(1e-3, (1.0 - self.cfg.conf_min))
+                conf_scale = max(0.5, min(1.0, conf_norm * 0.5 + 0.5))
+                kp_eff = self.cfg.kp * conf_scale
+                kd_eff = self.cfg.kd * conf_scale
+
+                ux = kp_eff * xpred + self._Ix - kd_eff * dx
+                uy = kp_eff * ypred + self._Iy - kd_eff * dy
                 # Integrator with simple clamping
                 self._Ix += self.cfg.ki * xpred * tick_dt
                 self._Iy += self.cfg.ki * ypred * tick_dt
@@ -167,14 +183,14 @@ class ControlWorker:
                 self._Ix = max(-clamp, min(clamp, self._Ix))
                 self._Iy = max(-clamp, min(clamp, self._Iy))
 
-                # Quantize and cap; set explicit burst duration aligned to camera fps
+                # Dynamic burst duration aligned to detection cadence
+                T_burst = max(0.08, min(0.22, self._det_dt_ema if self._det_t_last is not None else T_burst_fallback))
+
+                # Quantize and cap; set explicit burst duration aligned to detection fps
                 mm = self._quantize_and_cap(ux, uy, T_burst)
-                # Gating: issue a command only on new detection, or near end of current burst
-                should_issue = False
-                if det is not None and self._seq_last_issued != self._seq_last:
-                    should_issue = True
-                elif eta_s <= 0.02:  # ~20 ms from end
-                    should_issue = True
+
+                # End-of-burst gating only to prevent ping-pong
+                should_issue = (eta_s <= 0.03)
                 if mm is not None and should_issue:
                     # Use fixed T so scheduler paces to the frame cadence
                     mm = type(mm)(Nx=mm.Nx, Ny=mm.Ny, T=T_burst)
