@@ -168,7 +168,7 @@ class App:
                 "tick_hz": 90,
                 "alpha": 0.6,
                 "beta": 0.08,
-                "kp": 0.8,
+                "kp": 1.1,
                 "kd": 0.20,
                 "ki": 0.02,
                 "deadband_steps": 2,
