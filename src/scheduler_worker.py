@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
+import math
 
 import RPi.GPIO as GPIO
 import logging
@@ -123,10 +124,31 @@ class SchedulerWorker:
 
         return S_pk, T_a, T_c, Nd_feasible
 
+    def _t_min_for_steps(self, Nd: int) -> float:
+        """
+        Minimal feasible duration to perform Nd dominant steps under Smax/Amax.
+        Triangular if Nd <= (Smax^2)/A, otherwise trapezoidal.
+        """
+        if Nd <= 0:
+            return 0.0
+        A = self.cfg.a_max_steps_s2
+        Smax = self.cfg.s_max_steps_s
+        Nd_tri = (Smax * Smax) / max(1e-9, A)
+        if Nd <= Nd_tri:
+            return 2.0 * math.sqrt(Nd / max(1e-9, A))
+        return (Nd / max(1e-9, Smax)) + (Smax / max(1e-9, A))
+
     def _run_burst(self, cmd: MicroMove) -> None:
         Nx = int(cmd.Nx)
         Ny = int(cmd.Ny)
-        T = float(cmd.T)
+        # Determine duration: use provided T or compute minimal feasible
+        Nx_abs_init = abs(Nx)
+        Ny_abs_init = abs(Ny)
+        Nd_init = max(Nx_abs_init, Ny_abs_init)
+        if cmd.T is None:
+            T = self._t_min_for_steps(Nd_init)
+        else:
+            T = float(cmd.T)
         print(f"[Scheduler] run_burst: Nx={Nx} Ny={Ny} T={T:.4f}s")
         self._log.info("run_burst Nx=%s Ny=%s T=%.4f", Nx, Ny, T)
         if self.logger is not None:
@@ -135,8 +157,8 @@ class SchedulerWorker:
             except Exception:
                 pass
 
-        Nx_abs = abs(Nx)
-        Ny_abs = abs(Ny)
+        Nx_abs = Nx_abs_init
+        Ny_abs = Ny_abs_init
         Nd = max(Nx_abs, Ny_abs)
         if Nd == 0 or T <= 0:
             self.eta.write(0.0)
@@ -248,8 +270,9 @@ class SchedulerWorker:
                     try:
                         # Small timeout so we can update ETA to 0 when idle
                         cmd: MicroMove = self.queue.get(timeout=0.05)
-                        print(f"[Scheduler] got cmd: Nx={cmd.Nx} Ny={cmd.Ny} T={cmd.T}", flush=True)
-                        self._log.info("got cmd Nx=%s Ny=%s T=%.4f", cmd.Nx, cmd.Ny, cmd.T)
+                        t_label = cmd.T if cmd.T is not None else "auto"
+                        print(f"[Scheduler] got cmd: Nx={cmd.Nx} Ny={cmd.Ny} T={t_label}", flush=True)
+                        self._log.info("got cmd Nx=%s Ny=%s T=%s", cmd.Nx, cmd.Ny, str(t_label))
                     except Exception:
                         self.eta.write(0.0)
                         # Optional heartbeat to confirm loop is alive without spamming console:

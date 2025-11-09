@@ -29,9 +29,14 @@ class SpyQueue:
     def __init__(self, q):
         self._q = q
         self.last_mm = None
+        self.last_put_ts = None
 
     def put_nowait(self, item):
         self.last_mm = item
+        try:
+            self.last_put_ts = time.perf_counter()
+        except Exception:
+            self.last_put_ts = None
         return self._q.put_nowait(item)
 
     def get(self, timeout=None):
@@ -72,12 +77,19 @@ def _feasible_steps_for_T(T: float, Smax: float, A: float) -> int:
     Ta = Smax / A
     return max(0, int(Smax * (T - Ta)))
 
+def _t_min_for_steps(Nd: int, Smax: float, A: float) -> float:
+    if Nd <= 0:
+        return 0.0
+    Nd_tri = (Smax * Smax) / max(1e-9, A)
+    if Nd <= Nd_tri:
+        return 2.0 * (Nd / max(1e-9, A)) ** 0.5
+    return (Nd / max(1e-9, Smax)) + (Smax / max(1e-9, A))
+
 
 def main() -> None:
     # Shared containers
     mailbox = LatestDetectionMailbox()
-    base_q = create_move_queue(maxsize=16)  # slightly larger to avoid transient full
-    move_queue = SpyQueue(base_q)
+    move_queue = SpyQueue(create_move_queue(maxsize=16))
     eta = SchedulerETA()
 
     # Scheduler configuration (mirrors defaults)
@@ -156,7 +168,8 @@ def main() -> None:
     except Exception:
         pass
 
-    print(f"[Script] MicroMove from control: Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.3f}s")
+    # Scheduler will auto-compute T for this vector
+    print(f"[Script] MicroMove from control: Nx={mm.Nx} Ny={mm.Ny} T={'auto' if getattr(mm, 'T', None) is None else mm.T}")
 
     # Validate direction and approximate magnitude against the same logic as Control
     ex, ey = _measurement_from_pixels(cx_px, cy_px, W, H, ctrl_cfg.fov_x_rad, ctrl_cfg.fov_y_rad)
@@ -191,25 +204,14 @@ def main() -> None:
         expect_ratio = abs(Nx_cap / Ny_cap)
         assert abs(ratio - expect_ratio) <= 0.25 * max(1.0, expect_ratio), "XY ratio deviates more than tolerance"
 
-    # Drain any queued items and re-enqueue just one mm to ensure a single burst executes
-    while True:
-        try:
-            _ = base_q.get_nowait()
-        except queue.Empty:
-            break
-        except Exception:
-            break
-    try:
-        base_q.put_nowait(mm)
-    except Exception:
-        pass
-    print("[Script] Enqueued single MicroMove to scheduler")
+    # Predict scheduler duration for this step vector (auto-T)
+    Nd_final = max(abs(mm.Nx), abs(mm.Ny))
+    T_pred = _t_min_for_steps(Nd_final, ctrl_cfg.s_max_steps_s, ctrl_cfg.a_max_steps_s2)
 
     # Wait for scheduler to become active (ETA > 0), then complete (ETA back to 0)
     saw_active = False
     t0 = time.perf_counter()
-    T = mm.T
-    while time.perf_counter() - t0 < (T + 1.0):
+    while time.perf_counter() - t0 < (T_pred + 1.0):
         e = eta.read()
         if e > 0.0:
             saw_active = True
@@ -226,18 +228,18 @@ def main() -> None:
     if mm.Ny != 0 and Ny_cap != 0:
         print(f"[Script] Direction check pitch OK: sign={('+' if mm.Ny>0 else '-')} target={('+' if Ny_cap>0 else '-')}")
 
-    # Capture start marker just before enqueue
-t_mark = time.perf_counter()
-base_q.put_nowait(mm)
-
-# ... after completion ...
-y_times = [t for t in getattr(sched.yaw, "times", []) if t >= t_mark]
-p_times = [t for t in getattr(sched.pitch, "times", []) if t >= t_mark]
-if y_times and p_times:
-    win_start = min(y_times[0], p_times[0])
-    win_end   = max(y_times[-1], p_times[-1])
-    dur = win_end - win_start
-    assert abs(dur - T) <= max(0.05, 0.3 * T), f"..."
+    # Timing window using timestamps recorded after the control's last put
+    y_times = getattr(sched.yaw, "times", []) or []
+    p_times = getattr(sched.pitch, "times", []) or []
+    t_mark = getattr(move_queue, "last_put_ts", None)
+    if t_mark is not None:
+        y_times = [t for t in y_times if t >= t_mark]
+        p_times = [t for t in p_times if t >= t_mark]
+    if y_times and p_times:
+        win_start = min(y_times[0], p_times[0])
+        win_end   = max(y_times[-1], p_times[-1])
+        dur = win_end - win_start
+        assert abs(dur - T_pred) <= max(0.05, 0.3 * T_pred), f"Burst duration {dur:.3f}s deviates from T_pred={T_pred:.3f}s"
 
     # Cleanup
     sched_stop.set()

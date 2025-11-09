@@ -32,7 +32,7 @@ class PredState:
 class MicroMove:
     Nx: int   # steps for yaw (right +)
     Ny: int   # steps for pitch (up +)
-    T: float  # planned duration (s)
+    T: Optional[float] = None  # planned duration (s); None => scheduler auto-computes
 
 
 class LatestDetectionMailbox:

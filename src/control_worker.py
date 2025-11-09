@@ -102,7 +102,8 @@ class ControlWorker:
             # Enforce deadband post-scale
             if abs(Nx) < self.cfg.deadband_steps and abs(Ny) < self.cfg.deadband_steps:
                 return None
-        return MicroMove(Nx=Nx, Ny=Ny, T=T)
+        # Let scheduler choose duration for this step vector
+        return MicroMove(Nx=Nx, Ny=Ny, T=None)
 
     def run_loop(self, stop_event: Optional[Any] = None) -> None:
         tick_dt = 1.0 / max(1.0, self.cfg.tick_hz)
@@ -163,10 +164,11 @@ class ControlWorker:
                 if mm is not None:
                     try:
                         self.move_queue.put_nowait(mm)
-                        print(f"[Control] enqueued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.3f}s")
+                        t_label = mm.T if mm.T is not None else "auto"
+                        print(f"[Control] enqueued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
                         if self.logger is not None:
                             try:
-                                self.logger.log("Control", "enqueue_mm", f"Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.4f}")
+                                self.logger.log("Control", "enqueue_mm", f"Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
                             except Exception:
                                 pass
                     except Exception:
