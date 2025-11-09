@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
 import RPi.GPIO as GPIO
+import logging
 
 try:
     from .shared import MicroMove, SchedulerETA  # type: ignore
@@ -62,6 +63,13 @@ class SchedulerWorker:
     """
 
     def __init__(self, cfg: SchedulerConfig, move_queue, eta: SchedulerETA, logger: Optional[Any] = None) -> None:
+        # Python logging setup (lightweight; only configure root if not already configured)
+        if not logging.getLogger().handlers:
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s",
+            )
+        self._log = logging.getLogger("edja.scheduler")
         self.cfg = cfg
         self.queue = move_queue
         self.eta = eta
@@ -70,6 +78,7 @@ class SchedulerWorker:
         self.yaw = StepperAxis(cfg.yaw_pins, cfg.yaw_cw_positive)
         self.pitch = StepperAxis(cfg.pitch_pins, cfg.pitch_cw_positive)
         print(f"[Scheduler] setup: tick_hz={cfg.tick_hz}, Smax={cfg.s_max_steps_s}, Amax={cfg.a_max_steps_s2}, BCM={cfg.gpio_mode_bcm}")
+        self._log.info("setup tick_hz=%s Smax=%s Amax=%s BCM=%s", cfg.tick_hz, cfg.s_max_steps_s, cfg.a_max_steps_s2, cfg.gpio_mode_bcm)
         if self.logger is not None:
             try:
                 self.logger.log("Scheduler", "setup", f"tick_hz={cfg.tick_hz} Smax={cfg.s_max_steps_s} Amax={cfg.a_max_steps_s2} BCM={cfg.gpio_mode_bcm}")
@@ -119,6 +128,7 @@ class SchedulerWorker:
         Ny = int(cmd.Ny)
         T = float(cmd.T)
         print(f"[Scheduler] run_burst: Nx={Nx} Ny={Ny} T={T:.4f}s")
+        self._log.info("run_burst Nx=%s Ny=%s T=%.4f", Nx, Ny, T)
         if self.logger is not None:
             try:
                 self.logger.log("Scheduler", "run_burst", f"Nx={Nx} Ny={Ny} T={T:.4f}")
@@ -217,6 +227,7 @@ class SchedulerWorker:
         self.eta.write(0.0)
         if flush_remaining > 0 or (max(0, Nx_abs - steps_x_done) > 0):
             print("[Scheduler] flush_remaining steps completed")
+            self._log.info("flush_remaining steps completed")
         if self.logger is not None:
             try:
                 self.logger.log("Scheduler", "burst_done", f"Nx_done={steps_x_done}/{Nx_abs} Ny_done={steps_y_done}/{Ny_abs}")
@@ -228,14 +239,21 @@ class SchedulerWorker:
             try:
                 while True:
                     if stop_event is not None and stop_event.is_set():
+                        self._log.info("stop_event set; exiting run_loop")
                         break
                     try:
                         # Small timeout so we can update ETA to 0 when idle
                         cmd: MicroMove = self.queue.get(timeout=0.05)
+                        print(f"[Scheduler] got cmd: Nx={cmd.Nx} Ny={cmd.Ny} T={cmd.T}", flush=True)
+                        self._log.info("got cmd Nx=%s Ny=%s T=%.4f", cmd.Nx, cmd.Ny, cmd.T)
                     except Exception:
                         self.eta.write(0.0)
+                        # Optional heartbeat to confirm loop is alive without spamming console:
+                        # self._log.debug("idle (queue empty)")
                         continue
                     self._run_burst(cmd)
+                    print("[Scheduler] burst finished", flush=True)
+                    self._log.info("burst finished")
             finally:
                 # Ensure outputs low
                 for p in list(self.cfg.yaw_pins) + list(self.cfg.pitch_pins):
@@ -251,6 +269,7 @@ class SchedulerWorker:
             import traceback
             print("[Scheduler] crashed:", e)
             traceback.print_exc()
+            self._log.error("Scheduler crashed: %s", e, exc_info=True)
             try:
                 GPIO.cleanup()
             except Exception:
