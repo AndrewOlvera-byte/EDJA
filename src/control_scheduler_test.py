@@ -38,6 +38,26 @@ class SpyQueue:
         return self._q.get(timeout=timeout)
 
 
+# Monkeypatch StepperAxis to capture step timestamps for timing verification
+import time
+
+
+class TimedStepper(SW.StepperAxis):  # type: ignore[attr-defined]
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.times = []
+
+    def step_once(self, positive: bool) -> None:
+        super().step_once(positive)
+        try:
+            self.times.append(time.perf_counter())
+        except Exception:
+            pass
+
+
+SW.StepperAxis = TimedStepper  # type: ignore[attr-defined]
+
+
 def _measurement_from_pixels(cx: float, cy: float, W: int, H: int, fov_x_rad: float, fov_y_rad: float):
     ex = ((cx - (W / 2.0)) / (W / 2.0)) * (fov_x_rad / 2.0)
     ey = -((cy - (H / 2.0)) / (H / 2.0)) * (fov_y_rad / 2.0)
@@ -65,8 +85,8 @@ def main() -> None:
         tick_hz=1500.0,
         s_max_steps_s=500.0,
         a_max_steps_s2=4000.0,
-        yaw_pins=(23, 24, 25, 5),
-        pitch_pins=(17, 18, 27, 22),
+        yaw_pins=(17, 18, 27, 22),
+        pitch_pins=(23, 24, 25, 5),
         yaw_cw_positive=True,
         pitch_cw_positive=False,
         gpio_mode_bcm=True,
@@ -207,9 +227,9 @@ def main() -> None:
         print(f"[Script] Direction check pitch OK: sign={('+' if mm.Ny>0 else '-')} target={('+' if Ny_cap>0 else '-')}")
 
     # Simultaneity window and duration close to planned T
-    if yaw_axis.times and pitch_axis.times:
-        win_start = min(yaw_axis.times[0], pitch_axis.times[0])
-        win_end = max(yaw_axis.times[-1], pitch_axis.times[-1])
+    if getattr(sched.yaw, "times", None) and getattr(sched.pitch, "times", None):
+        win_start = min(sched.yaw.times[0], sched.pitch.times[0])
+        win_end = max(sched.yaw.times[-1], sched.pitch.times[-1])
         dur = win_end - win_start
         # Host timing jitter tolerance
         assert abs(dur - T) <= max(0.05, 0.3 * T), f"Burst duration {dur:.3f}s deviates from T={T:.3f}s"
