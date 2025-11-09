@@ -216,18 +216,22 @@ class SchedulerWorker:
                 time.sleep(to_sleep)
 
         # If any remainder steps not completed (due to quantization), flush them at safe rate
-        flush_remaining = max(0, Nx_abs - steps_x_done)
-        for _ in range(flush_remaining):
-            self.yaw.step_once(dir_x_pos)
-            time.sleep(tick_dt)
-        flush_remaining = max(0, Ny_abs - steps_y_done)
-        for _ in range(flush_remaining):
-            self.pitch.step_once(dir_y_pos)
-            time.sleep(tick_dt)
+        flush_x = max(0, Nx_abs - steps_x_done)
+        flush_y = max(0, Ny_abs - steps_y_done)
+        if flush_x > 0 or flush_y > 0:
+            # Interleave remaining steps to keep axes visually in sync
+            while flush_x > 0 or flush_y > 0:
+                if flush_x > 0:
+                    self.yaw.step_once(dir_x_pos)
+                    flush_x -= 1
+                if flush_y > 0:
+                    self.pitch.step_once(dir_y_pos)
+                    flush_y -= 1
+                # small delay to avoid blasting coils too fast
+                time.sleep(min(tick_dt, 0.002))
+            self._log.info("flush_remaining steps completed (interleaved)")
+            print("[Scheduler] flush_remaining steps completed (interleaved)")
         self.eta.write(0.0)
-        if flush_remaining > 0 or (max(0, Nx_abs - steps_x_done) > 0):
-            print("[Scheduler] flush_remaining steps completed")
-            self._log.info("flush_remaining steps completed")
         if self.logger is not None:
             try:
                 self.logger.log("Scheduler", "burst_done", f"Nx_done={steps_x_done}/{Nx_abs} Ny_done={steps_y_done}/{Ny_abs}")
