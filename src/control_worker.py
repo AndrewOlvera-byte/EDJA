@@ -30,6 +30,7 @@ class ControlConfig:
     steps_per_rev: int
     s_max_steps_s: float
     a_max_steps_s2: float
+    queue_prefill_depth: int
 
 
 class ControlWorker:
@@ -202,11 +203,14 @@ class ControlWorker:
                 self._Ix = max(-clamp, min(clamp, self._Ix))
                 self._Iy = max(-clamp, min(clamp, self._Iy))
 
-                # Dynamic burst duration aligned to detection cadence
-                T_burst = max(0.06, min(0.22, self._det_dt_ema if self._det_t_last is not None else T_burst_fallback))
+                # Dynamic burst duration aligned to detection cadence (slightly lower min for snappier response)
+                T_burst = max(0.05, min(0.22, self._det_dt_ema if self._det_t_last is not None else T_burst_fallback))
 
                 # Quantize and cap; set explicit burst duration aligned to detection fps
                 mm = None if lost else self._quantize_and_cap(ux, uy, T_burst)
+
+                # Prefill queue up to target depth to smooth continuous motion
+                target_depth = int(getattr(self.cfg, "queue_prefill_depth", 1))
 
                 # End-of-burst gating only to prevent ping-pong
                 big_err = False
@@ -215,41 +219,56 @@ class ControlWorker:
                         big_err = (abs(int(mm.Nx)) >= 20) or (abs(int(mm.Ny)) >= 20)
                     except Exception:
                         big_err = False
-                should_issue = (eta_s <= 0.03) or big_err
-                if mm is not None and should_issue:
-                    # Use fixed T so scheduler paces to the frame cadence
-                    mm = type(mm)(Nx=mm.Nx, Ny=mm.Ny, T=T_burst)
+
+                should_issue_now = (eta_s <= 0.03) or big_err
+
+                to_put = 0
+                try:
+                    qsz = int(self.move_queue.qsize())
+                except Exception:
+                    qsz = 0
+                if mm is not None:
+                    if qsz < target_depth:
+                        to_put = max(1, target_depth - qsz)
+                    elif should_issue_now:
+                        to_put = 1
+
+                for _ in range(to_put):
+                    mm_copy = type(mm)(Nx=mm.Nx, Ny=mm.Ny, T=T_burst)
                     try:
-                        self.move_queue.put_nowait(mm)
+                        self.move_queue.put_nowait(mm_copy)
                         self._seq_last_issued = self._seq_last
-                        t_label = mm.T if mm.T is not None else "auto"
-                        print(f"[Control] enqueued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
+                        t_label = mm_copy.T if mm_copy.T is not None else "auto"
+                        print(f"[Control] enqueued MicroMove Nx={mm_copy.Nx} Ny={mm_copy.Ny} T={t_label}")
                         if self.logger is not None:
                             try:
-                                self.logger.log("Control", "enqueue_mm", f"Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
+                                self.logger.log("Control", "enqueue_mm", f"Nx={mm_copy.Nx} Ny={mm_copy.Ny} T={t_label}")
                             except Exception:
                                 pass
                     except Exception:
-                        # Queue full: replace oldest so latest command wins
-                        try:
-                            _ = self.move_queue.get_nowait()
-                        except Exception:
-                            pass
-                        try:
-                            self.move_queue.put_nowait(mm)
-                            self._seq_last_issued = self._seq_last
-                            print(f"[Control] replaced queued MicroMove Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
-                            if self.logger is not None:
-                                try:
-                                    self.logger.log("Control", "replace_mm", f"Nx={mm.Nx} Ny={mm.Ny} T={t_label}")
-                                except Exception:
-                                    pass
-                        except Exception:
-                            if self.logger is not None:
-                                try:
-                                    self.logger.log("Control", "queue_full", "drop after replace attempt")
-                                except Exception:
-                                    pass
+                        # If depth is 1, preserve previous behavior (replace oldest). Otherwise, stop topping up.
+                        if target_depth <= 1:
+                            try:
+                                _ = self.move_queue.get_nowait()
+                            except Exception:
+                                pass
+                            try:
+                                self.move_queue.put_nowait(mm_copy)
+                                self._seq_last_issued = self._seq_last
+                                print(f"[Control] replaced queued MicroMove Nx={mm_copy.Nx} Ny={mm_copy.Ny} T={t_label}")
+                                if self.logger is not None:
+                                    try:
+                                        self.logger.log("Control", "replace_mm", f"Nx={mm_copy.Nx} Ny={mm_copy.Ny} T={t_label}")
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                if self.logger is not None:
+                                    try:
+                                        self.logger.log("Control", "queue_full", "drop after replace attempt")
+                                    except Exception:
+                                        pass
+                        else:
+                            break
 
                 # Sleep to maintain tick rate
                 next_tick = time.perf_counter() + tick_dt

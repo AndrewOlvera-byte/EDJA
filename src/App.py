@@ -25,7 +25,7 @@ class App:
 
         # Shared containers
         self.mailbox = LatestDetectionMailbox()
-        self.move_queue = create_move_queue(maxsize=1)
+        self.move_queue = create_move_queue(maxsize=int(self.cfg.get("scheduler", {}).get("queue_maxsize", 8)))
         self.eta = SchedulerETA()
         # Logger
         self.logger = None
@@ -88,6 +88,7 @@ class App:
                 steps_per_rev=int(self.cfg["stepper"]["steps_per_rev"]),
                 s_max_steps_s=float(self.cfg["scheduler"]["s_max_steps_s"]),
                 a_max_steps_s2=float(self.cfg["scheduler"]["a_max_steps_s2"]),
+                queue_prefill_depth=int(self.cfg["control"].get("queue_prefill_depth", 2)),
             ),
             det_mailbox=self.mailbox,
             move_queue=self.move_queue,
@@ -175,12 +176,14 @@ class App:
                 # Burst duration will be dynamically matched to detection fps; this is fallback
                 "micro_move_T_ms": 120.0,
                 "tau0_ms": 60.0,
+                "queue_prefill_depth": 2,
             },
             "scheduler": {
                 # Lower max speed/accel for smoother movement
-                "tick_hz": 1200,
-                "s_max_steps_s": 140,
-                "a_max_steps_s2": 700,
+                "tick_hz": 1500,
+                "s_max_steps_s": 200,
+                "a_max_steps_s2": 1000,
+                "queue_maxsize": 8,
             },
             "stepper": {
                 "steps_per_rev": 4096,
