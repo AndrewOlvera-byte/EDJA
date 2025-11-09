@@ -101,7 +101,7 @@ class ControlWorker:
         Ny = int(round(uy_rad * self._steps_per_rad))
         # Axis-specific deadband: slightly larger on Y for stability
         dbx = self.cfg.deadband_steps
-        dby = max(self.cfg.deadband_steps, int(round(self.cfg.deadband_steps * 1.5)))
+        dby = max(self.cfg.deadband_steps, int(round(self.cfg.deadband_steps * 1.33)))
         if abs(Nx) < dbx and abs(Ny) < dby:
             return None
         Nd = max(abs(Nx), abs(Ny))
@@ -203,7 +203,7 @@ class ControlWorker:
                 self._Iy = max(-clamp, min(clamp, self._Iy))
 
                 # Dynamic burst duration aligned to detection cadence
-                T_burst = max(0.06, min(0.22, self._det_dt_ema if self._det_t_last is not None else T_burst_fallback))
+                T_burst = max(0.05, min(0.22, self._det_dt_ema if self._det_t_last is not None else T_burst_fallback))
 
                 # Quantize and cap; set explicit burst duration aligned to detection fps
                 mm = None if lost else self._quantize_and_cap(ux, uy, T_burst)
@@ -212,7 +212,7 @@ class ControlWorker:
                 big_err = False
                 if mm is not None:
                     try:
-                        big_err = (abs(int(mm.Nx)) >= 20) or (abs(int(mm.Ny)) >= 20)
+                        big_err = (abs(int(mm.Nx)) >= 10) or (abs(int(mm.Ny)) >= 10)
                     except Exception:
                         big_err = False
                 should_issue = (eta_s <= 0.03) or big_err

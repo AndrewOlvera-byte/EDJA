@@ -164,17 +164,21 @@ class App:
                 "show_window": True,
             },
             "control": {
-                # Pace control near camera cadence; add damping and velocity estimate
-                "tick_hz": 90,
+                # Higher control rate for snappier corrections
+                "tick_hz": 120,
                 "alpha": 0.6,
                 "beta": 0.08,
-                "kp": 0.8,
+                # Slightly higher proportional; damping unchanged (Y gets extra damping in control loop)
+                "kp": 0.85,
                 "kd": 0.22,
-                "ki": 0.0,
-                "deadband_steps": 8,
+                # Small integral to remove steady-state error and finish centering
+                "ki": 0.06,
+                # Slightly smaller deadband so it keeps nudging near center
+                "deadband_steps": 6,
                 # Burst duration will be dynamically matched to detection fps; this is fallback
-                "micro_move_T_ms": 120.0,
-                "tau0_ms": 60.0,
+                "micro_move_T_ms": 110.0,
+                # Shorter prediction horizon to reduce overshoot-related hesitation
+                "tau0_ms": 40.0,
             },
             "scheduler": {
                 # Lower max speed/accel for smoother movement
