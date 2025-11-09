@@ -25,7 +25,7 @@ class App:
 
         # Shared containers
         self.mailbox = LatestDetectionMailbox()
-        self.move_queue = create_move_queue(maxsize=2)
+        self.move_queue = create_move_queue(maxsize=1)
         self.eta = SchedulerETA()
         # Logger
         self.logger = None
@@ -169,9 +169,9 @@ class App:
                 "alpha": 0.6,
                 "beta": 0.08,
                 "kp": 0.8,
-                "kd": 0.22,
-                "ki": 0.0,
-                "deadband_steps": 8,
+                "kd": 0.20,
+                "ki": 0.02,
+                "deadband_steps": 2,
                 # Burst duration will be dynamically matched to detection fps; this is fallback
                 "micro_move_T_ms": 120.0,
                 "tau0_ms": 60.0,
