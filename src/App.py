@@ -25,7 +25,7 @@ class App:
 
         # Shared containers
         self.mailbox = LatestDetectionMailbox()
-        self.move_queue = create_move_queue(maxsize=1)
+        self.move_queue = create_move_queue(maxsize=2)
         self.eta = SchedulerETA()
         # Logger
         self.logger = None
