@@ -1,5 +1,6 @@
 from MotorManager import MotorManager
 import threading
+import RPi.GPIO as GPIO
 class App:
     def __init__(self):
         self.gpio_pins_up_down = [17, 18, 27, 22]
@@ -18,6 +19,10 @@ class App:
         thread1.join()
         thread2.join()
 
+        self.up_down_motor.cleanup()
+        self.right_left_motor.cleanup()
+
+        GPIO.cleanup()
         exit(0)
 
 
