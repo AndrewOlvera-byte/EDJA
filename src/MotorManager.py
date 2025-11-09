@@ -28,7 +28,7 @@ class MotorManager:
         step_count = 4096 / 360 * degrees # 5.625*(1/64) per step, 4096 steps is 360°
         int_step_count = int(step_count)
 
-        # defining stepper motor sequence (found in documentation http://www.4tronix.co.uk/arduino/Stepper-Motors.php)
+        # defining stepper motor sequence
         step_sequence = [[1,0,0,1],
                         [1,0,0,0],
                         [1,1,0,0],

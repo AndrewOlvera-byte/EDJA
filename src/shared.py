@@ -101,5 +101,4 @@ class CsvEventLogger:
                     writer = csv.writer(f)
                     writer.writerow([ts_iso, thread, event, message])
             except Exception:
-                # Best-effort logging; do not raise
                 pass

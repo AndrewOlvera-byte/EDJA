@@ -9,9 +9,9 @@ import RPi.GPIO as GPIO
 import logging
 
 try:
-    from .shared import MicroMove, SchedulerETA  # type: ignore
+    from .shared import MicroMove, SchedulerETA
 except Exception:
-    from shared import MicroMove, SchedulerETA  # type: ignore
+    from shared import MicroMove, SchedulerETA
 
 
 _STEP_SEQUENCE = [
@@ -60,11 +60,11 @@ class SchedulerConfig:
 class SchedulerWorker:
     """
     Time-based step scheduler for two axes. Consumes MicroMove bursts and
-    emits steps so both axes finish together in T.
+    emits steps so both axes finish together in T
     """
 
     def __init__(self, cfg: SchedulerConfig, move_queue, eta: SchedulerETA, logger: Optional[Any] = None) -> None:
-        # Python logging setup (lightweight; only configure root if not already configured)
+        # Python logging setup
         if not logging.getLogger().handlers:
             logging.basicConfig(
                 level=logging.INFO,
@@ -93,7 +93,7 @@ class SchedulerWorker:
     def _solve_trapezoid(self, Nd: int, T: float) -> Tuple[float, float, float, int]:
         """
         Given dominant steps Nd and target duration T, return (S_pk, T_a, T_c, Nd_feasible)
-        honoring S_max and A_max. If Nd exceeds feasible steps for T, returns scaled Nd_feasible.
+        honoring S_max and A_max. If Nd exceeds feasible steps for T, returns scaled Nd_feasible
         """
         A = self.cfg.a_max_steps_s2
         Smax = self.cfg.s_max_steps_s
@@ -101,11 +101,11 @@ class SchedulerWorker:
         if Nd_req == 0 or T <= 0:
             return 0.0, 0.0, 0.0, 0
 
-        # First try ideal trapezoid ignoring Smax
+        # Try ideal trapezoid ignoring Smax
         # Discriminant for T_a from Nd = A*T_a*(T - T_a)
         disc = T * T - 4.0 * Nd_req / max(1e-9, A)
         if disc < 0.0:
-            # Too many steps for given A,T -> treat as triangular at limit
+            # Too many steps for given A,T -> treat as triangular
             T_a = T / 2.0
         else:
             T_a = 0.5 * (T - disc ** 0.5)
@@ -127,7 +127,7 @@ class SchedulerWorker:
     def _t_min_for_steps(self, Nd: int) -> float:
         """
         Minimal feasible duration to perform Nd dominant steps under Smax/Amax.
-        Triangular if Nd <= (Smax^2)/A, otherwise trapezoidal.
+        Triangular if Nd <= (Smax^2)/A, otherwise trapezoidal
         """
         if Nd <= 0:
             return 0.0
@@ -275,8 +275,6 @@ class SchedulerWorker:
                         self._log.info("got cmd Nx=%s Ny=%s T=%s", cmd.Nx, cmd.Ny, str(t_label))
                     except Exception:
                         self.eta.write(0.0)
-                        # Optional heartbeat to confirm loop is alive without spamming console:
-                        # self._log.debug("idle (queue empty)")
                         continue
                     self._run_burst(cmd)
                     print("[Scheduler] burst finished", flush=True)

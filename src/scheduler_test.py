@@ -10,23 +10,22 @@ import traceback
 import sys as _sys
 import faulthandler
 
-# Enable fault handler for hard crashes (segfaults, etc.)
+# Enable fault handler for hard crashes
 faulthandler.enable()
 
-# Ensure thread exceptions are printed to console
+# Ensure thread exceptions are printed
 def _thread_excepthook(args):
     print(f"[Thread-EXC] {args.thread.name} crashed: {args.exc_value}", flush=True)
     traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
 
 threading.excepthook = _thread_excepthook
 
-# Allow running as `python src/scheduler_test.py`
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from shared import MicroMove, SchedulerETA, create_move_queue  # noqa: E402
-from scheduler_worker import SchedulerConfig, SchedulerWorker  # noqa: E402
+from shared import MicroMove, SchedulerETA, create_move_queue
+from scheduler_worker import SchedulerConfig, SchedulerWorker
 
 
 def main() -> None:

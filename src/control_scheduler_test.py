@@ -6,24 +6,23 @@ import threading
 import queue
 from pathlib import Path
 
-# Allow running as `python src/control_scheduler_test.py`
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from shared import (  # noqa: E402
+from shared import (
     LatestDetectionMailbox,
     SchedulerETA,
     create_move_queue,
     Detection,
 )
-import scheduler_worker as SW  # noqa: E402
-import control_worker as CW  # noqa: E402
+import scheduler_worker as SW
+import control_worker as CW
 
 
 class SpyQueue:
     """
-    Wraps a queue to capture the last enqueued MicroMove while delegating to the real queue.
+    Wraps a queue to capture the last enqueued MicroMove while delegating to the real queue
     """
 
     def __init__(self, q):
@@ -43,11 +42,10 @@ class SpyQueue:
         return self._q.get(timeout=timeout)
 
 
-# Monkeypatch StepperAxis to capture step timestamps for timing verification
 import time
 
 
-class TimedStepper(SW.StepperAxis):  # type: ignore[attr-defined]
+class TimedStepper(SW.StepperAxis):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.times = []
@@ -60,7 +58,7 @@ class TimedStepper(SW.StepperAxis):  # type: ignore[attr-defined]
             pass
 
 
-SW.StepperAxis = TimedStepper  # type: ignore[attr-defined]
+SW.StepperAxis = TimedStepper
 
 
 def _measurement_from_pixels(cx: float, cy: float, W: int, H: int, fov_x_rad: float, fov_y_rad: float):
@@ -92,7 +90,7 @@ def main() -> None:
     move_queue = SpyQueue(create_move_queue(maxsize=16))
     eta = SchedulerETA()
 
-    # Scheduler configuration (mirrors defaults)
+    # Scheduler configuration
     sched_cfg = SW.SchedulerConfig(
         tick_hz=1500.0,
         s_max_steps_s=500.0,
@@ -139,7 +137,7 @@ def main() -> None:
 
     # Create one fake detection that is off-center in both axes
     W, H = 640, 640
-    cx_px, cy_px = 0.9 * W, 0.2 * H  # right and above center => ex > 0, ey > 0
+    cx_px, cy_px = 0.9 * W, 0.2 * H
     now = time.perf_counter()
     det = Detection(
         t_cap=now,
@@ -154,7 +152,7 @@ def main() -> None:
     mailbox.write(det)
     print(f"[Script] Wrote fake detection: cx={cx_px:.1f}, cy={cy_px:.1f}, conf={det.conf}")
 
-    # Wait for Control to enqueue a MicroMove (do not consume from the queue here)
+    # Wait for Control to enqueue a MicroMove
     deadline = time.perf_counter() + 1.0
     while move_queue.last_mm is None and time.perf_counter() < deadline:
         time.sleep(0.01)
@@ -186,29 +184,29 @@ def main() -> None:
     else:
         Nx_cap, Ny_cap = Nx_ideal, Ny_ideal
 
-    # Direction checks (unless axis gets zeroed by deadband)
+    # Direction checks
     if Nx_cap != 0 and mm.Nx != 0:
         assert (mm.Nx > 0) == (Nx_cap > 0), "Yaw sign does not point toward center"
     if Ny_cap != 0 and mm.Ny != 0:
         assert (mm.Ny > 0) == (Ny_cap > 0), "Pitch sign does not point toward center"
 
-    # Magnitude checks within small tolerance (allow rounding error)
+    # Magnitude checks
     if Nx_cap != 0 and mm.Nx != 0:
         assert abs(mm.Nx - Nx_cap) <= 2, f"Yaw magnitude off: got {mm.Nx}, expect ~{Nx_cap}"
     if Ny_cap != 0 and mm.Ny != 0:
         assert abs(mm.Ny - Ny_cap) <= 2, f"Pitch magnitude off: got {mm.Ny}, expect ~{Ny_cap}"
 
-    # Ratio (proportionality) check if both are non-zero
+    # Ratio check if both are non-zero
     if all(v != 0 for v in (mm.Nx, mm.Ny, Nx_cap, Ny_cap)):
         ratio = abs(mm.Nx / mm.Ny)
         expect_ratio = abs(Nx_cap / Ny_cap)
         assert abs(ratio - expect_ratio) <= 0.25 * max(1.0, expect_ratio), "XY ratio deviates more than tolerance"
 
-    # Predict scheduler duration for this step vector (auto-T)
+    # Predict scheduler duration for this step vector
     Nd_final = max(abs(mm.Nx), abs(mm.Ny))
     T_pred = _t_min_for_steps(Nd_final, ctrl_cfg.s_max_steps_s, ctrl_cfg.a_max_steps_s2)
 
-    # Wait for scheduler to become active (ETA > 0), then complete (ETA back to 0)
+    # Wait for scheduler to become active, then complete
     saw_active = False
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < (T_pred + 1.0):
@@ -216,19 +214,17 @@ def main() -> None:
         if e > 0.0:
             saw_active = True
         time.sleep(0.01)
-    time.sleep(0.1)  # small tail window
+    time.sleep(0.1)
     assert saw_active, "Scheduler never became active (ETA stayed 0)"
     assert eta.read() == 0.0, "ETA not zero after burst completion"
     print("[Script] Scheduler burst completed (ETA returned to 0)")
 
-    # Note: Using real StepperAxis and GPIO. Visual verification is expected here.
-    # We keep direction/magnitude checks on the command produced by Control:
     if mm.Nx != 0 and Nx_cap != 0:
         print(f"[Script] Direction check yaw OK: sign={('+' if mm.Nx>0 else '-')} target={('+' if Nx_cap>0 else '-')}")
     if mm.Ny != 0 and Ny_cap != 0:
         print(f"[Script] Direction check pitch OK: sign={('+' if mm.Ny>0 else '-')} target={('+' if Ny_cap>0 else '-')}")
 
-    # Timing window using timestamps recorded after the control's last put
+    # Timing window
     y_times = getattr(sched.yaw, "times", []) or []
     p_times = getattr(sched.pitch, "times", []) or []
     t_mark = getattr(move_queue, "last_put_ts", None)
@@ -248,7 +244,7 @@ def main() -> None:
     except Exception:
         pass
     try:
-        SW.GPIO.cleanup()  # type: ignore[attr-defined]
+        SW.GPIO.cleanup()
     except Exception:
         pass
 
