@@ -118,18 +118,43 @@ def ensure_onnx_model_exists() -> Path:
     raise FileNotFoundError("Export finished but yolo11n.onnx not found. Check Ultralytics export logs.")
 
 
-def preprocess_for_onnx(image_rgb: np.ndarray, size=(640, 640)) -> np.ndarray:
+def preprocess_for_onnx(image_rgb: np.ndarray, size=(640, 640)) -> tuple[np.ndarray, float, float, float]:
     """
-    Minimal preprocessing for YOLOv11n ONNX:
-    - Resize to (size,size) (no letterbox for simplicity)
+    Letterbox preprocessing for YOLOv11n ONNX:
+    - Preserve aspect ratio with padding to 'size'
     - Normalize to [0, 1]
     - Convert HWC RGB -> NCHW
+
+    Returns: (tensor, ratio, pad_x, pad_y)
+      ratio: scale from original -> model space
+      pad_x, pad_y: padding applied on left/top in model space
     """
-    resized = cv2.resize(image_rgb, size, interpolation=cv2.INTER_LINEAR)
-    tensor = resized.astype(np.float32) / 255.0
+    ih, iw = image_rgb.shape[:2]
+    tw, th = size
+
+    r = min(tw / float(iw), th / float(ih))
+    new_w = int(round(iw * r))
+    new_h = int(round(ih * r))
+
+    resized = cv2.resize(image_rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    pad_x_total = tw - new_w
+    pad_y_total = th - new_h
+    pad_x = pad_x_total / 2.0
+    pad_y = pad_y_total / 2.0
+
+    # Create letterboxed canvas (RGB)
+    canvas = np.full((th, tw, 3), 114, dtype=np.uint8)
+    x1 = int(np.floor(pad_x))
+    y1 = int(np.floor(pad_y))
+    x2 = x1 + new_w
+    y2 = y1 + new_h
+    canvas[y1:y2, x1:x2] = resized
+
+    tensor = canvas.astype(np.float32) / 255.0
     tensor = np.transpose(tensor, (2, 0, 1))  # HWC -> CHW
     tensor = np.expand_dims(tensor, axis=0).copy()  # add batch dim, ensure contiguous
-    return tensor
+    return tensor, float(r), float(pad_x), float(pad_y)
 
 
 def non_max_suppression(boxes_xyxy: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
@@ -250,9 +275,10 @@ def parse_onnx_detections(outputs: list, conf_threshold: float) -> np.ndarray:
     return dets.astype(np.float32)
 
 
-def draw_detections(frame_bgr: np.ndarray, dets_xyxy: np.ndarray, scale_x: float, scale_y: float) -> None:
+def draw_detections(frame_bgr: np.ndarray, dets_xyxy: np.ndarray, ratio: float, pad_x: float, pad_y: float) -> None:
     """
-    Draw rectangles and labels onto frame_bgr using detections in model (input) space.
+    Draw rectangles and labels onto frame_bgr using detections in model (input) space
+    with letterbox mapping.
     dets_xyxy: (M, 6) with [x1,y1,x2,y2,score,class_id]
     """
     if dets_xyxy.size == 0:
@@ -260,11 +286,11 @@ def draw_detections(frame_bgr: np.ndarray, dets_xyxy: np.ndarray, scale_x: float
     h, w = frame_bgr.shape[:2]
     for det in dets_xyxy:
         x1, y1, x2, y2, score, cls_id = det.tolist()
-        # Scale from model input space (640x640) to original frame size
-        rx1 = int(max(0, min(w - 1, x1 * scale_x)))
-        ry1 = int(max(0, min(h - 1, y1 * scale_y)))
-        rx2 = int(max(0, min(w - 1, x2 * scale_x)))
-        ry2 = int(max(0, min(h - 1, y2 * scale_y)))
+        # Map from model input (letterboxed) back to original frame coordinates
+        rx1 = int(max(0, min(w - 1, (x1 - pad_x) / max(1e-6, ratio))))
+        ry1 = int(max(0, min(h - 1, (y1 - pad_y) / max(1e-6, ratio))))
+        rx2 = int(max(0, min(w - 1, (x2 - pad_x) / max(1e-6, ratio))))
+        ry2 = int(max(0, min(h - 1, (y2 - pad_y) / max(1e-6, ratio))))
 
         color = (0, 255, 255) if int(cls_id) % 2 == 0 else (255, 0, 0)
         cv2.rectangle(frame_bgr, (rx1, ry1), (rx2, ry2), color, 2)
@@ -307,7 +333,7 @@ def main():
             frame_rgb = picam2.capture_array()
 
             # Prepare model input
-            input_tensor = preprocess_for_onnx(frame_rgb, size=INPUT_SIZE)
+            input_tensor, ratio, pad_x, pad_y = preprocess_for_onnx(frame_rgb, size=INPUT_SIZE)
 
             # Run inference and parse detections
             outputs = session.run(None, {input_name: input_tensor})
@@ -325,11 +351,8 @@ def main():
             # Convert to BGR for display and overlay FPS
             frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
 
-            # Draw detections (scale from model input size to original frame size)
-            h, w = frame_bgr.shape[:2]
-            scale_x = w / float(INPUT_SIZE[0])
-            scale_y = h / float(INPUT_SIZE[1])
-            draw_detections(frame_bgr, dets, scale_x, scale_y)
+            # Draw detections with letterbox mapping
+            draw_detections(frame_bgr, dets, ratio, pad_x, pad_y)
 
             cv2.putText(
                 frame_bgr,

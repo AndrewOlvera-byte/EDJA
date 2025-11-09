@@ -84,7 +84,7 @@ class VisionWorker:
         H, W = frame_rgb.shape[:2]
         return frame_rgb, W, H
 
-    def _pick_target(self, dets_xyxy: np.ndarray, scale_x: float, scale_y: float) -> Optional[Tuple[float, float, float, int]]:
+    def _pick_target(self, dets_xyxy: np.ndarray, ratio: float, pad_x: float, pad_y: float, W: int, H: int) -> Optional[Tuple[float, float, float, int]]:
         """
         dets_xyxy: (M, 6) [x1,y1,x2,y2,score,cls] in model input space (e.g., 640x640).
         Returns (cx_px, cy_px, conf, cls) in original frame pixel coordinates.
@@ -102,9 +102,11 @@ class VisionWorker:
         x1, y1, x2, y2, conf, cls = cand[idx].tolist()
         cx_model = (x1 + x2) * 0.5
         cy_model = (y1 + y2) * 0.5
-        # Scale to frame pixels
-        cx_px = cx_model * scale_x
-        cy_px = cy_model * scale_y
+        # Map from model input (letterboxed) to original frame pixels
+        cx_px = (cx_model - float(pad_x)) / max(1e-6, float(ratio))
+        cy_px = (cy_model - float(pad_y)) / max(1e-6, float(ratio))
+        cx_px = float(max(0.0, min(float(W - 1), cx_px)))
+        cy_px = float(max(0.0, min(float(H - 1), cy_px)))
         return float(cx_px), float(cy_px), float(conf), int(cls)
 
     def run_loop(self, stop_event: Optional[Any] = None, fps_overlay: bool = False) -> None:
@@ -131,16 +133,14 @@ class VisionWorker:
                 t_cap = time.perf_counter()
                 frame_rgb, W, H = self._capture_rgb()
 
-                tensor = preprocess_for_onnx(frame_rgb, size=(input_w, input_h))
+                tensor, ratio, pad_x, pad_y = preprocess_for_onnx(frame_rgb, size=(input_w, input_h))
                 outputs = self._session.run(None, {self._input_name: tensor})
                 t_inf = time.perf_counter()
 
                 # Parse and find target
                 dets = parse_onnx_detections(outputs, conf_threshold=self.cfg.conf_min)
 
-                scale_x = W / float(input_w)
-                scale_y = H / float(input_h)
-                picked = self._pick_target(dets, scale_x, scale_y)
+                picked = self._pick_target(dets, ratio, pad_x, pad_y, W, H)
 
                 if picked is not None:
                     cx_px, cy_px, conf, cls = picked
@@ -184,10 +184,16 @@ class VisionWorker:
                     else:
                         fps_smooth = fps_smooth * 0.9 + fps_instant * 0.1
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                    # Draw detections (in model input space scaled to original)
-                    if dets is not None and dets.size > 0:
+                    # Draw only the tracked target (person) using letterbox mapping
+                    if dets is not None and dets.size > 0 and picked is not None:
                         try:
-                            draw_detections(frame_bgr, dets, scale_x, scale_y)
+                            # Filter to target class and select same max-conf target
+                            classes = dets[:, 5].astype(np.int32)
+                            dets_person = dets[classes == int(self.cfg.target_cls)]
+                            if dets_person.size > 0:
+                                idx = int(np.argmax(dets_person[:, 4]))
+                                target_det = dets_person[idx][None, :]
+                                draw_detections(frame_bgr, target_det, ratio, pad_x, pad_y)
                         except Exception:
                             pass
                     cv2.putText(
