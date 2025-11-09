@@ -5,6 +5,20 @@ import time
 from pathlib import Path
 
 import RPi.GPIO as GPIO
+import threading
+import traceback
+import sys as _sys
+import faulthandler
+
+# Enable fault handler for hard crashes (segfaults, etc.)
+faulthandler.enable()
+
+# Ensure thread exceptions are printed to console
+def _thread_excepthook(args):
+    print(f"[Thread-EXC] {args.thread.name} crashed: {args.exc_value}", flush=True)
+    traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
+
+threading.excepthook = _thread_excepthook
 
 # Allow running as `python src/scheduler_test.py`
 BASE_DIR = Path(__file__).resolve().parent
@@ -38,11 +52,8 @@ def main() -> None:
         try:
             sched.run_loop()
         except Exception as e:
-            import traceback
-            print("[Scheduler] crashed:", e)
+            print("[Scheduler] crashed:", e, flush=True)
             traceback.print_exc()
-
-    import threading
 
     t = threading.Thread(target=run_sched, daemon=True)
     t.start()
@@ -56,15 +67,17 @@ def main() -> None:
             MicroMove(Nx=0, Ny=-200, T=0.5),
         ]
         for m in moves:
-            print("Enqueue:", m)
+            print("Enqueue:", m, flush=True)
             q.put(m)
             # Poll ETA
             t0 = time.perf_counter()
             while time.perf_counter() - t0 < m.T + 0.2:
-                print(f"ETA: {eta.read():.3f}s", end="\r")
+                print(f"ETA: {eta.read():.3f}s", end="\r", flush=True)
                 time.sleep(0.05)
             print()
         time.sleep(0.5)
+        # Give the scheduler thread a moment to print any crash info
+        t.join(timeout=0.5)
     except KeyboardInterrupt:
         pass
     finally:
