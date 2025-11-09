@@ -14,7 +14,7 @@ try:
 except Exception:
     _PICAM_AVAILABLE = False
 
-from .shared import Detection, LatestDetectionMailbox
+from shared import Detection, LatestDetectionMailbox
 try:
     # When running as package (python -m src.App)
     from .vision_detect_loop_test import preprocess_for_onnx, parse_onnx_detections  # type: ignore
