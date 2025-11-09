@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 import threading
+import queue
 from pathlib import Path
 
 # Allow running as `python src/control_scheduler_test.py`
@@ -68,6 +69,23 @@ class CountingAxis:
         self.times.append(time.perf_counter())
 
 
+class SpyQueue:
+    """
+    Wraps a queue to capture the last enqueued MicroMove while delegating to the real queue.
+    """
+
+    def __init__(self, q):
+        self._q = q
+        self.last_mm = None
+
+    def put_nowait(self, item):
+        self.last_mm = item
+        return self._q.put_nowait(item)
+
+    def get(self, timeout=None):
+        return self._q.get(timeout=timeout)
+
+
 def _measurement_from_pixels(cx: float, cy: float, W: int, H: int, fov_x_rad: float, fov_y_rad: float):
     ex = ((cx - (W / 2.0)) / (W / 2.0)) * (fov_x_rad / 2.0)
     ey = -((cy - (H / 2.0)) / (H / 2.0)) * (fov_y_rad / 2.0)
@@ -86,7 +104,8 @@ def _feasible_steps_for_T(T: float, Smax: float, A: float) -> int:
 def main() -> None:
     # Shared containers
     mailbox = LatestDetectionMailbox()
-    move_queue = create_move_queue(maxsize=4)
+    base_q = create_move_queue(maxsize=16)  # slightly larger to avoid transient full
+    move_queue = SpyQueue(base_q)
     eta = SchedulerETA()
 
     # Monkeypatch StepperAxis to our counting axis (before creating SchedulerWorker)
@@ -104,6 +123,10 @@ def main() -> None:
         gpio_mode_bcm=True,
     )
     sched = SW.SchedulerWorker(cfg=sched_cfg, move_queue=move_queue, eta=eta, logger=None)
+    # Start scheduler loop in background
+    sched_stop = threading.Event()
+    t_sched = threading.Thread(target=sched.run_loop, kwargs={"stop_event": sched_stop}, daemon=True)
+    t_sched.start()
 
     # Control configuration tuned for determinism in this script
     fov_x_deg, fov_y_deg = 54.0, 41.0
@@ -127,8 +150,8 @@ def main() -> None:
     ctrl = CW.ControlWorker(cfg=ctrl_cfg, det_mailbox=mailbox, move_queue=move_queue, eta=eta, logger=None)
 
     # Run control in its own thread so it can enqueue a MicroMove
-    stop = threading.Event()
-    t_control = threading.Thread(target=ctrl.run_loop, kwargs={"stop_event": stop}, daemon=True)
+    ctrl_stop = threading.Event()
+    t_control = threading.Thread(target=ctrl.run_loop, kwargs={"stop_event": ctrl_stop}, daemon=True)
     t_control.start()
 
     # Create one fake detection that is off-center in both axes
@@ -147,16 +170,11 @@ def main() -> None:
     )
     mailbox.write(det)
 
-    # Wait for Control to enqueue a MicroMove
-    mm = None
+    # Wait for Control to enqueue a MicroMove (do not consume from the queue here)
     deadline = time.perf_counter() + 1.0
-    while time.perf_counter() < deadline:
-        try:
-            mm = move_queue.get(timeout=0.05)
-            break
-        except Exception:
-            pass
-
+    while move_queue.last_mm is None and time.perf_counter() < deadline:
+        time.sleep(0.01)
+    mm = move_queue.last_mm
     assert mm is not None, "Control did not enqueue a MicroMove within 1s"
     print(f"[Script] MicroMove from control: Nx={mm.Nx} Ny={mm.Ny} T={mm.T:.3f}s")
 
@@ -193,10 +211,38 @@ def main() -> None:
         expect_ratio = abs(Nx_cap / Ny_cap)
         assert abs(ratio - expect_ratio) <= 0.25 * max(1.0, expect_ratio), "XY ratio deviates more than tolerance"
 
-    # Execute a single burst with the scheduler and verify simultaneity
+    # Stop control to avoid refilling the queue; keep scheduler running to actuate
+    ctrl_stop.set()
+    try:
+        t_control.join(timeout=1.0)
+    except Exception:
+        pass
+
+    # Drain any queued items and re-enqueue just one mm to ensure a single burst executes
+    while True:
+        try:
+            _ = base_q.get_nowait()
+        except queue.Empty:
+            break
+        except Exception:
+            break
+    try:
+        base_q.put_nowait(mm)
+    except Exception:
+        pass
+
+    # Wait for scheduler to become active (ETA > 0), then complete (ETA back to 0)
+    saw_active = False
     t0 = time.perf_counter()
-    sched._run_burst(mm)  # type: ignore[attr-defined]  # call internal for deterministic single-burst run
-    t1 = time.perf_counter()
+    T = mm.T
+    while time.perf_counter() - t0 < (T + 1.0):
+        e = eta.read()
+        if e > 0.0:
+            saw_active = True
+        time.sleep(0.01)
+    time.sleep(0.1)  # small tail window
+    assert saw_active, "Scheduler never became active (ETA stayed 0)"
+    assert eta.read() == 0.0, "ETA not zero after burst completion"
 
     # Read counters from monkeypatched axes
     yaw_axis = sched.yaw  # type: ignore[attr-defined]
@@ -212,13 +258,10 @@ def main() -> None:
         # Host timing jitter tolerance
         assert abs(dur - T) <= max(0.05, 0.3 * T), f"Burst duration {dur:.3f}s deviates from T={T:.3f}s"
 
-    # ETA returns to 0 at the end of burst
-    assert eta.read() == 0.0, "ETA not zero after burst completion"
-
     # Cleanup
-    stop.set()
+    sched_stop.set()
     try:
-        t_control.join(timeout=1.0)
+        t_sched.join(timeout=1.0)
     except Exception:
         pass
     try:
@@ -226,7 +269,7 @@ def main() -> None:
     except Exception:
         pass
 
-    print("[Script] OK: Control direction/magnitude correct and Scheduler ran XY concurrently.")
+    print("[Script] OK: Control enqueued, Scheduler consumed and actuated XY concurrently.")
 
 
 if __name__ == "__main__":
