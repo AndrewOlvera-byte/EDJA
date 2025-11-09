@@ -182,8 +182,8 @@ class App:
             },
             "stepper": {
                 "steps_per_rev": 4096,
-                "yaw_pins": [17, 18, 27, 22],
-                "pitch_pins": [23, 24, 25, 5],
+                "yaw_pins": [23, 24, 25, 5],
+                "pitch_pins": [17, 18, 27, 22],
                 "yaw_cw_positive": True,
                 "pitch_cw_positive": False,
             },
