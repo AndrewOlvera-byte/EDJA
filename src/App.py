@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 import RPi.GPIO as GPIO
-import yaml
 
 # Allow running as `python src/App.py` by adding this directory to sys.path
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,8 +20,8 @@ from shared import CsvEventLogger  # noqa: E402
 
 class App:
     def __init__(self, config_path: str = "config/config.yaml"):
-        self.config_path = str(config_path)
-        self.cfg = self._load_config(self.config_path)
+        # Hardcoded configuration (no YAML)
+        self.cfg = self._default_config()
 
         # Shared containers
         self.mailbox = LatestDetectionMailbox()
@@ -165,25 +164,29 @@ class App:
                 "show_window": True,
             },
             "control": {
-                "tick_hz": 150,
+                # Slightly slower loop; add damping and velocity estimate for smoothness
+                "tick_hz": 120,
                 "alpha": 1.0,
-                "beta": 0.0,
-                "kp": 1.8,
-                "kd": 0.0,
+                "beta": 0.2,
+                "kp": 1.6,
+                "kd": 0.25,
                 "ki": 0.0,
-                "deadband_steps": 1,
-                "micro_move_T_ms": 200.0,
+                "deadband_steps": 3,
+                # Longer burst window allows fewer, smoother bursts
+                "micro_move_T_ms": 350.0,
                 "tau0_ms": 0.0,
             },
             "scheduler": {
-                "tick_hz": 1500,
-                "s_max_steps_s": 500,
-                "a_max_steps_s2": 4000,
+                # Lower max speed/accel for slower, smoother movement
+                "tick_hz": 1200,
+                "s_max_steps_s": 220,
+                "a_max_steps_s2": 1200,
             },
             "stepper": {
                 "steps_per_rev": 4096,
-                "yaw_pins": [23, 24, 25, 5],
-                "pitch_pins": [17, 18, 27, 22],
+                # Use the pin mapping previously in config.yaml
+                "yaw_pins": [17, 18, 27, 22],
+                "pitch_pins": [23, 24, 25, 5],
                 "yaw_cw_positive": True,
                 "pitch_cw_positive": False,
             },
@@ -193,23 +196,6 @@ class App:
                 "csv_path": "logs/edja_events.csv",
             },
         }
-
-    def _load_config(self, path_str: str) -> Dict[str, Any]:
-        cfg = self._default_config()
-        path = Path(path_str)
-        if path.exists():
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    user_cfg = yaml.safe_load(f) or {}
-                # Shallow-merge dicts
-                for k, v in user_cfg.items():
-                    if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-                        cfg[k].update(v)
-                    else:
-                        cfg[k] = v
-            except Exception:
-                pass
-        return cfg
 
     def start(self) -> None:
         try:
