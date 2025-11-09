@@ -8,14 +8,14 @@ vision:
 
 control:
   tick_hz: 150
-  alpha: 0.6
-  beta: 0.2
+  alpha: 1.0
+  beta: 0.0
   kp: 1.8
-  kd: 0.2
+  kd: 0.0
   ki: 0.0
   deadband_steps: 1
-  micro_move_T_ms: 40
-  tau0_ms: 60
+  micro_move_T_ms: 200.0
+  tau0_ms: 0.0
 
 scheduler:
   tick_hz: 1500
@@ -24,8 +24,8 @@ scheduler:
 
 stepper:
   steps_per_rev: 4096
-  yaw_pins: [23, 24, 25, 5]
-  pitch_pins: [17, 18, 27, 22]
+  yaw_pins: [17, 18, 27, 22]
+  pitch_pins: [23, 24, 25, 5]
   yaw_cw_positive: true
   pitch_cw_positive: false
 
